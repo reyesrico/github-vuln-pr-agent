@@ -41,7 +41,16 @@ Automate GitHub vulnerability remediation from Dependabot alerts to tested and v
 9. Automated GitHub settings rollout tooling:
 - Added `scripts/rollout-actions.sh` to set Actions Variables/Secrets via GitHub CLI.
 - Added `.github/docs/rollout.env.template` as a ready-to-fill env source for rollout.
-- Installed GitHub CLI locally (`gh`), but rollout is pending CLI authentication.
+- Installed and authenticated GitHub CLI locally (`gh`).
+- Applied variables/secrets and successfully dispatched workflow runs.
+10. Recommendation E2E simulation flow:
+- Added `.github/docs/E2E_REACT_TEST_SIMULATION_PLAN.md`.
+- Added runnable E2E script `src/e2e/recommendationFlow.ts` and npm script `e2e:recommendation`.
+- Simulated incoming email targeting `reyesrico/react-test`.
+- Executed add-library phase for `is-odd`, created and merged PR #23.
+- Verified notification email delivery via Ethereal preview URL.
+- Executed remove-library phase for `is-odd`, created and merged PR #24.
+- Verified second notification email delivery via Ethereal preview URL.
 
 ## Testing Status
 Last full quality run passed locally with:
@@ -55,33 +64,14 @@ Test suite status:
 - 9 tests passed
 
 ## Configuration Pending (GitHub side)
-Add these in GitHub repository settings:
-
-### Secrets
-- SECURITY_AGENT_GITHUB_TOKEN
-- SMTP_USER
-- SMTP_PASS
-
-### Variables
-- ALERT_REPOSITORIES
-- DRY_RUN
-- VULN_SEVERITIES
-- BRANCH_PREFIX
-- MAX_ALERTS_PER_REPO
-- REPO_COMMANDS
-- EMAIL_ENABLED
-- EMAIL_TO
-- EMAIL_FROM
-- SMTP_HOST
-- SMTP_PORT
-- SMTP_SECURE
+- Current rollout is configured and running in dry-run mode with `EMAIL_ENABLED=false`.
+- If production email is desired, set `EMAIL_ENABLED=true` and provide SMTP variables/secrets.
 
 ## Recommended Next Steps
-1. Set DRY_RUN=true and run workflow_dispatch once.
-2. Confirm email delivery and report format.
-3. Confirm branch creation behavior in at least one target repository.
-4. Switch DRY_RUN=false for real PR creation.
-5. Optionally enable auto-merge policy and branch protections.
+1. Tune dependency-fix strategy for peer-dependency conflicts (ERESOLVE) in target repos.
+2. Enable SMTP configuration and verify real mailbox delivery if required.
+3. Switch `DRY_RUN=false` when ready for real PR creation in orchestrator workflow.
+4. Optionally enable auto-merge policy and branch protections.
 
 ## How To Resume Quickly In Copilot
 Prompt suggestion:

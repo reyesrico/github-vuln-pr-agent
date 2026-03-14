@@ -70,3 +70,17 @@ Automated rollout command:
 - For repositories with custom command needs, set `REPO_COMMANDS` as JSON.
 - Merge shortcut is included in the email as a GitHub CLI command.
 - Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.
+
+## E2E Recommendation Simulation
+- Plan: [./.github/docs/E2E_REACT_TEST_SIMULATION_PLAN.md](.github/docs/E2E_REACT_TEST_SIMULATION_PLAN.md)
+- Run:
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" npm run e2e:recommendation
+```
+
+- Optional overrides:
+- `E2E_TARGET_REPO` (default `reyesrico/react-test`)
+- `E2E_LIBRARY` (default `is-odd`)
+- `E2E_LIBRARY_VERSION` (default `3.0.1`)
+- `E2E_EMAIL_MODE` (`ethereal`, `smtp`, or `off`; default `ethereal`)
