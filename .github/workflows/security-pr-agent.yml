@@ -1,0 +1,46 @@
+name: Security PR Agent
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run vulnerability PR agent
+        env:
+          GITHUB_TOKEN: ${{ secrets.SECURITY_AGENT_GITHUB_TOKEN }}
+          ALERT_REPOSITORIES: ${{ vars.ALERT_REPOSITORIES }}
+          RAW_GITHUB_EMAIL: ${{ vars.RAW_GITHUB_EMAIL }}
+          DRY_RUN: ${{ vars.DRY_RUN }}
+          VULN_SEVERITIES: ${{ vars.VULN_SEVERITIES }}
+          BRANCH_PREFIX: ${{ vars.BRANCH_PREFIX }}
+          MAX_ALERTS_PER_REPO: ${{ vars.MAX_ALERTS_PER_REPO }}
+          REPO_COMMANDS: ${{ vars.REPO_COMMANDS }}
+          EMAIL_ENABLED: ${{ vars.EMAIL_ENABLED }}
+          EMAIL_TO: ${{ vars.EMAIL_TO }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_SECURE: ${{ vars.SMTP_SECURE }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: npm run dev

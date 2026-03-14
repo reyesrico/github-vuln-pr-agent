@@ -1,0 +1,72 @@
+export type Severity = "low" | "moderate" | "high" | "critical";
+
+export interface DependabotAlert {
+  number: number;
+  dependencyName: string;
+  dependencyEcosystem: string;
+  manifestPath: string;
+  severity: Severity;
+  summary: string;
+  cveId?: string;
+  ghsaId: string;
+  htmlUrl: string;
+  patchedVersion?: string;
+}
+
+export interface RepoCommands {
+  install?: string;
+  lint?: string;
+  test?: string;
+}
+
+export interface FixInput {
+  repoFullName: string;
+  alert: DependabotAlert;
+  branchPrefix: string;
+  githubToken: string;
+  dryRun: boolean;
+  commands: RepoCommands;
+}
+
+export interface FixResult {
+  repoFullName: string;
+  branchName: string;
+  changedFiles: string[];
+  localPath: string;
+  commitMessage: string;
+  skipped: boolean;
+  reason?: string;
+}
+
+export interface CommandResult {
+  command: string;
+  success: boolean;
+  output: string;
+}
+
+export interface TestResult {
+  repoFullName: string;
+  branchName: string;
+  commands: CommandResult[];
+  success: boolean;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  reasons: string[];
+}
+
+export interface PullRequestResult {
+  repoFullName: string;
+  pullNumber: number;
+  pullUrl: string;
+  title: string;
+}
+
+export interface ProcessedAlertResult {
+  repoFullName: string;
+  alert: DependabotAlert;
+  status: "created" | "skipped" | "failed";
+  details: string;
+  pullRequest?: PullRequestResult;
+}
