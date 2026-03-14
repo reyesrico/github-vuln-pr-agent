@@ -1,7 +1,7 @@
 import type { Octokit } from "@octokit/rest";
 
 import { splitRepoFullName } from "./client.js";
-import type { DependabotAlert, PullRequestResult, Severity } from "../types.js";
+import type { AlertSignal, DependabotAlert, PullRequestResult, Severity } from "../types.js";
 
 function normalizeSeverity(input: string): Severity {
   if (input === "critical" || input === "high" || input === "moderate") {
@@ -14,7 +14,8 @@ export async function listOpenDependabotAlerts(
   client: Octokit,
   repoFullName: string,
   severities: Severity[],
-  limit: number
+  limit: number,
+  alertSignal?: AlertSignal
 ): Promise<DependabotAlert[]> {
   const { owner, repo } = splitRepoFullName(repoFullName);
 
@@ -53,9 +54,43 @@ export async function listOpenDependabotAlerts(
     .filter((alert) => severities.includes(alert.severity))
     .filter((alert) => alert.dependencyEcosystem === "npm")
     .filter((alert) => alert.manifestPath.includes("package-lock.json"))
+    .filter((alert) => {
+      if (!alertSignal) {
+        return true;
+      }
+
+      const matchesCve =
+        alertSignal.cveIds.length > 0 &&
+        Boolean(alert.cveId && alertSignal.cveIds.includes(alert.cveId));
+      const matchesGhsa =
+        alertSignal.ghsaIds.length > 0 && alertSignal.ghsaIds.includes(alert.ghsaId.toUpperCase());
+      const matchesDependency =
+        alertSignal.dependencyNames.length > 0 &&
+        alertSignal.dependencyNames
+          .map((name) => name.toLowerCase())
+          .includes(alert.dependencyName.toLowerCase());
+
+      return matchesCve || matchesGhsa || matchesDependency;
+    })
     .slice(0, limit);
 
   return mapped;
+}
+
+export async function listAccountRepositories(
+  client: Octokit,
+  ownerLogin?: string
+): Promise<string[]> {
+  const repos = await client.paginate(client.rest.repos.listForAuthenticatedUser, {
+    visibility: "all",
+    affiliation: "owner",
+    per_page: 100
+  });
+
+  return repos
+    .filter((repo) => !ownerLogin || repo.owner?.login === ownerLogin)
+    .map((repo) => `${repo.owner?.login}/${repo.name}`)
+    .filter((fullName): fullName is string => Boolean(fullName && !fullName.startsWith("undefined/")));
 }
 
 export async function findOpenPullRequestByHead(

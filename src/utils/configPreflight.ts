@@ -14,10 +14,6 @@ export function buildConfigPreflight(
     missingRequiredEnv.push("GITHUB_TOKEN");
   }
 
-  if (!hasValue(env.ALERT_REPOSITORIES) && !hasValue(env.RAW_GITHUB_EMAIL)) {
-    missingRequiredEnv.push("ALERT_REPOSITORIES or RAW_GITHUB_EMAIL");
-  }
-
   if (config.email.enabled) {
     if (!hasValue(env.EMAIL_TO)) {
       missingRequiredEnv.push("EMAIL_TO");
@@ -40,6 +36,23 @@ export function buildConfigPreflight(
       count: config.repositories.length,
       sample: config.repositories.slice(0, 3)
     },
+    repositoryDiscovery: {
+      configuredList: hasValue(env.ALERT_REPOSITORIES),
+      viaGithubAdvisoryEmail: hasValue(env.RAW_GITHUB_EMAIL),
+      autoDiscoverAllOwnedRepos: !hasValue(env.ALERT_REPOSITORIES) && !hasValue(env.RAW_GITHUB_EMAIL),
+      accountLoginFilter: config.accountLogin ?? "(not set)"
+    },
+    alertSelection: {
+      processOnlyEmailSignal: config.processOnlyEmailSignal,
+      emailSignalActive: Boolean(
+        config.alertSignal?.cveIds.length ||
+          config.alertSignal?.ghsaIds.length ||
+          config.alertSignal?.dependencyNames.length
+      ),
+      cveIds: config.alertSignal?.cveIds ?? [],
+      ghsaIds: config.alertSignal?.ghsaIds ?? [],
+      dependencyNames: config.alertSignal?.dependencyNames ?? []
+    },
     severities: config.severities,
     branchPrefix: config.branchPrefix,
     maxAlertsPerRepo: config.maxAlertsPerRepo,
@@ -52,6 +65,7 @@ export function buildConfigPreflight(
     },
     email: {
       enabled: config.email.enabled,
+      failOpen: config.email.failOpen,
       recipientConfigured: Boolean(config.email.to),
       senderConfigured: Boolean(config.email.from),
       smtpHost: config.email.host,

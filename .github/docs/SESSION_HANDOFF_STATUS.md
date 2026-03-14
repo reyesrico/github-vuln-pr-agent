@@ -23,7 +23,7 @@ Automate GitHub vulnerability remediation from Dependabot alerts to tested and v
 4. Email integration:
 - SMTP notifier implemented.
 - Outlook/Hotmail defaults configured.
-- Target recipient preset in template as reyesrico@hotmail.com.
+- Recipient examples in templates are now generic placeholders.
 5. Documentation:
 - .github/docs/IMPLEMENTATION_PLAN.md
 - .github/docs/ARCHITECTURE.md
@@ -64,6 +64,12 @@ Automate GitHub vulnerability remediation from Dependabot alerts to tested and v
 - Created PR #25: https://github.com/reyesrico/react-test/pull/25.
 - Closed PR #25 without merge as requested.
 - SMTP delivery blocked because `SMTP_PASS` was not available; findings documented in `.github/docs/E2E_EXECUTION_FINDINGS.md`.
+13. Unattended E2E + production knowledge capture:
+- Added `.env.e2e.example` and `scripts/run-e2e-recommendation.sh` for no-manual local E2E runs.
+- Added `.github/workflows/e2e-recommendation.yml` for unattended GitHub Actions E2E runs.
+- E2E now auto-closes add PR on error (`E2E_AUTO_CLOSE_ON_ERROR=true`).
+- Added `EMAIL_FAIL_OPEN` to production config and workflow wiring.
+- Integrated E2E learnings into production docs and rollout templates.
 
 ## Testing Status
 Last full quality run passed locally with:

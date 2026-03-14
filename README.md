@@ -41,7 +41,7 @@ npm run dev
 ```
 
 ## Why The Env File Is Important
-- `.env` controls runtime behavior (repository scope, dry-run/live mode, severities, retry strategy, email delivery).
+- `.env` is the single source of truth for local development and E2E simulation (repository scope, dry-run/live mode, severities, retry strategy, email delivery, E2E options).
 - Incorrect values can stop PR creation or prevent notifications.
 - Keep `.env` outside version control and treat it as sensitive.
 
@@ -63,7 +63,7 @@ npm run dev
 - SMTP host default: `smtp-mail.outlook.com`
 - SMTP port default: `587`
 - TLS mode: `SMTP_SECURE=false` (STARTTLS on port 587)
-- `EMAIL_TO` default is `reyesrico@hotmail.com`
+- `EMAIL_TO` default is `alerts@example.com`
 
 ## GitHub Actions setup
 Use [./.github/workflows/security-pr-agent.yml](.github/workflows/security-pr-agent.yml).
@@ -78,6 +78,7 @@ Add repository variables:
 - `REPO_COMMANDS`
 - `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS`
 - `EMAIL_ENABLED`
+- `EMAIL_FAIL_OPEN`
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_SECURE`
@@ -130,6 +131,7 @@ gh workflow run security-pr-agent.yml --repo owner/repo
 - Install retries can automatically fall back to `--legacy-peer-deps` when `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true`.
 - Merge shortcut is included in the email as a GitHub CLI command.
 - Email reports include failure category for faster production triage.
+- `EMAIL_FAIL_OPEN=true` keeps production remediation running even if email provider is temporarily down.
 - Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.
 
 ## E2E Recommendation Simulation
@@ -140,9 +142,22 @@ gh workflow run security-pr-agent.yml --repo owner/repo
 GITHUB_TOKEN="$(gh auth token)" npm run e2e:recommendation
 ```
 
+Unattended local run:
+
+```bash
+./scripts/run-e2e-recommendation.sh
+```
+
+Unattended GitHub Actions run:
+- Workflow: [./.github/workflows/e2e-recommendation.yml](.github/workflows/e2e-recommendation.yml)
+- Trigger with `workflow_dispatch` after setting `E2E_*` variables and shared `EMAIL_*` / `SMTP_*` runtime values.
+
 - Optional overrides:
 - `E2E_TARGET_REPO` (default `reyesrico/react-test`)
 - `E2E_LIBRARY` (default `is-odd`)
 - `E2E_LIBRARY_VERSION` (default `3.0.1`)
 - `E2E_EMAIL_MODE` (`ethereal`, `smtp`, or `off`; default `ethereal`)
 - `E2E_FLOW_MODE` (`add-only-close` or `add-remove-merge`; default `add-only-close`)
+- `E2E_AUTO_CLOSE_ON_ERROR` (`true`/`false`; default `true`)
+- `EMAIL_TO`, `EMAIL_FROM`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`

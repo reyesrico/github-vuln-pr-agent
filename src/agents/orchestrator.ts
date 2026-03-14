@@ -3,6 +3,7 @@ import {
   createSecurityPullRequest,
   findOpenPullRequestByHead,
   getDefaultBranch,
+  listAccountRepositories,
   listOpenDependabotAlerts
 } from "../github/dependabot.js";
 import { sendEmailNotification } from "../notify/emailNotifier.js";
@@ -50,14 +51,32 @@ export class Orchestrator {
   async run(config: AppConfig): Promise<ProcessedAlertResult[]> {
     const client = createGithubClient(config.githubToken);
     const results: ProcessedAlertResult[] = [];
+    const emailSignalActive = Boolean(
+      config.alertSignal?.cveIds.length ||
+        config.alertSignal?.ghsaIds.length ||
+        config.alertSignal?.dependencyNames.length
+    );
 
-    for (const repoFullName of config.repositories) {
+    if (config.processOnlyEmailSignal && !emailSignalActive) {
+      logInfo("No new advisory email signal detected; skipping alert processing", {
+        processOnlyEmailSignal: config.processOnlyEmailSignal
+      });
+      return results;
+    }
+
+    const repositories =
+      config.repositories.length > 0
+        ? config.repositories
+        : await listAccountRepositories(client, config.accountLogin);
+
+    for (const repoFullName of repositories) {
       logInfo("Processing repository", { repoFullName });
       const alerts = await listOpenDependabotAlerts(
         client,
         repoFullName,
         config.severities,
-        config.maxAlertsPerRepo
+        config.maxAlertsPerRepo,
+        config.alertSignal
       );
 
       if (alerts.length === 0) {
@@ -188,7 +207,17 @@ export class Orchestrator {
       return results;
     }
 
-    await sendEmailNotification(config.email, results);
+    try {
+      await sendEmailNotification(config.email, results);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown email error";
+      logError("Email notification failed", { message, failOpen: config.email.failOpen });
+
+      if (!config.email.failOpen) {
+        throw error;
+      }
+    }
+
     return results;
   }
 }

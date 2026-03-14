@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import dotenv from "dotenv";
 import nodemailer from "nodemailer";
 import { z } from "zod";
 
@@ -22,6 +23,7 @@ const schema = z.object({
     .default("Subject: recommendation\nPlease add is-odd to reyesrico/react-test"),
   E2E_EMAIL_MODE: z.enum(["ethereal", "smtp", "off"]).default("ethereal"),
   E2E_FLOW_MODE: z.enum(["add-only-close", "add-remove-merge"]).default("add-only-close"),
+  E2E_AUTO_CLOSE_ON_ERROR: z.string().default("true"),
   EMAIL_TO: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
   SMTP_HOST: z.string().optional(),
@@ -32,6 +34,8 @@ const schema = z.object({
 });
 
 type Phase = "add" | "remove";
+
+dotenv.config({ path: ".env", quiet: true });
 
 interface PhaseResult {
   phase: Phase;
@@ -318,6 +322,8 @@ async function sendVerificationEmail(
 
 async function main(): Promise<void> {
   const env = schema.parse(process.env);
+  const autoCloseOnError = env.E2E_AUTO_CLOSE_ON_ERROR.trim().toLowerCase() === "true";
+  let addResult: PhaseResult | undefined;
 
   const repositories = extractRepositoriesFromGithubEmail(env.E2E_RAW_EMAIL);
   if (!repositories.includes(env.E2E_TARGET_REPO)) {
@@ -337,56 +343,77 @@ async function main(): Promise<void> {
     flowMode: env.E2E_FLOW_MODE
   });
 
-  const addResult = await runPhase(
-    env.GITHUB_TOKEN,
-    env.E2E_TARGET_REPO,
-    defaultBranch,
-    env.E2E_LIBRARY,
-    env.E2E_LIBRARY_VERSION,
-    env.E2E_RAW_EMAIL,
-    "add"
-  );
-
-  logInfo("Add phase completed", { ...addResult });
-
-  await sendVerificationEmail(env.E2E_EMAIL_MODE, addResult, env.E2E_LIBRARY, env);
-
-  if (env.E2E_FLOW_MODE === "add-only-close") {
-    await closePullRequest(
+  try {
+    addResult = await runPhase(
       env.GITHUB_TOKEN,
       env.E2E_TARGET_REPO,
-      addResult.pullNumber,
-      "E2E cleanup after notification"
+      defaultBranch,
+      env.E2E_LIBRARY,
+      env.E2E_LIBRARY_VERSION,
+      env.E2E_RAW_EMAIL,
+      "add"
     );
+
+    logInfo("Add phase completed", { ...addResult });
+
+    await sendVerificationEmail(env.E2E_EMAIL_MODE, addResult, env.E2E_LIBRARY, env);
+
+    if (env.E2E_FLOW_MODE === "add-only-close") {
+      await closePullRequest(
+        env.GITHUB_TOKEN,
+        env.E2E_TARGET_REPO,
+        addResult.pullNumber,
+        "E2E cleanup after notification"
+      );
+
+      logInfo("E2E recommendation simulation completed", {
+        addPr: addResult.pullUrl,
+        closedAfterEmail: true
+      });
+      return;
+    }
+
+    await mergePullRequest(env.GITHUB_TOKEN, env.E2E_TARGET_REPO, addResult.pullNumber, "add");
+
+    const removeResult = await runPhase(
+      env.GITHUB_TOKEN,
+      env.E2E_TARGET_REPO,
+      defaultBranch,
+      env.E2E_LIBRARY,
+      env.E2E_LIBRARY_VERSION,
+      env.E2E_RAW_EMAIL,
+      "remove"
+    );
+
+    logInfo("Remove phase completed", { ...removeResult });
+
+    await sendVerificationEmail(env.E2E_EMAIL_MODE, removeResult, env.E2E_LIBRARY, env);
+    await mergePullRequest(env.GITHUB_TOKEN, env.E2E_TARGET_REPO, removeResult.pullNumber, "remove");
 
     logInfo("E2E recommendation simulation completed", {
       addPr: addResult.pullUrl,
-      closedAfterEmail: true
+      removePr: removeResult.pullUrl
     });
-    return;
+  } catch (error) {
+    if (env.E2E_FLOW_MODE === "add-only-close" && autoCloseOnError && addResult) {
+      try {
+        await closePullRequest(
+          env.GITHUB_TOKEN,
+          env.E2E_TARGET_REPO,
+          addResult.pullNumber,
+          "E2E cleanup after failure"
+        );
+      } catch (closeError) {
+        const closeMessage = closeError instanceof Error ? closeError.message : "Unknown close error";
+        logError("Automatic PR close after E2E failure also failed", {
+          pullUrl: addResult.pullUrl,
+          closeMessage
+        });
+      }
+    }
+
+    throw error;
   }
-
-  await mergePullRequest(env.GITHUB_TOKEN, env.E2E_TARGET_REPO, addResult.pullNumber, "add");
-
-  const removeResult = await runPhase(
-    env.GITHUB_TOKEN,
-    env.E2E_TARGET_REPO,
-    defaultBranch,
-    env.E2E_LIBRARY,
-    env.E2E_LIBRARY_VERSION,
-    env.E2E_RAW_EMAIL,
-    "remove"
-  );
-
-  logInfo("Remove phase completed", { ...removeResult });
-
-  await sendVerificationEmail(env.E2E_EMAIL_MODE, removeResult, env.E2E_LIBRARY, env);
-  await mergePullRequest(env.GITHUB_TOKEN, env.E2E_TARGET_REPO, removeResult.pullNumber, "remove");
-
-  logInfo("E2E recommendation simulation completed", {
-    addPr: addResult.pullUrl,
-    removePr: removeResult.pullUrl
-  });
 }
 
 main().catch((error) => {

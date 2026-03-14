@@ -59,28 +59,39 @@ set_secret() {
 
 require_env SECURITY_AGENT_GITHUB_TOKEN
 
-require_env ALERT_REPOSITORIES
 require_env DRY_RUN
+require_env PROCESS_ONLY_EMAIL_SIGNAL
 require_env VULN_SEVERITIES
 require_env BRANCH_PREFIX
 require_env MAX_ALERTS_PER_REPO
 require_env REPO_COMMANDS
 require_env INSTALL_RETRY_WITH_LEGACY_PEER_DEPS
 require_env EMAIL_ENABLED
+require_env EMAIL_FAIL_OPEN
 require_env SMTP_HOST
 require_env SMTP_PORT
 require_env SMTP_SECURE
 
 set_secret SECURITY_AGENT_GITHUB_TOKEN
 
-set_var ALERT_REPOSITORIES
+if [[ -n "${ACCOUNT_LOGIN:-}" ]]; then
+  set_var ACCOUNT_LOGIN
+fi
+if [[ -n "${ALERT_REPOSITORIES:-}" ]]; then
+  set_var ALERT_REPOSITORIES
+fi
+if [[ -n "${RAW_GITHUB_EMAIL:-}" ]]; then
+  set_var RAW_GITHUB_EMAIL
+fi
 set_var DRY_RUN
+set_var PROCESS_ONLY_EMAIL_SIGNAL
 set_var VULN_SEVERITIES
 set_var BRANCH_PREFIX
 set_var MAX_ALERTS_PER_REPO
 set_var REPO_COMMANDS
 set_var INSTALL_RETRY_WITH_LEGACY_PEER_DEPS
 set_var EMAIL_ENABLED
+set_var EMAIL_FAIL_OPEN
 set_var SMTP_HOST
 set_var SMTP_PORT
 set_var SMTP_SECURE

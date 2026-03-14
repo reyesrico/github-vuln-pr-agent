@@ -38,7 +38,7 @@ Validate an end-to-end non-vulnerability workflow by simulating an incoming reco
 3. Notification verification (SMTP):
 - Send notification email containing PR URL and summary.
 - Verify message delivery proof:
-- SMTP mode: successful send response (message id) with sender/recipient `reyesrico@hotmail.com`.
+- SMTP mode: successful send response (message id) with configured sender/recipient addresses.
 - Email body explicitly states recommendation to add `is-odd` and includes PR link.
 
 4. Close PR phase:

@@ -28,8 +28,10 @@ jobs:
       - name: Run vulnerability PR agent
         env:
           GITHUB_TOKEN: ${{ secrets.SECURITY_AGENT_GITHUB_TOKEN }}
+          ACCOUNT_LOGIN: ${{ vars.ACCOUNT_LOGIN }}
           ALERT_REPOSITORIES: ${{ vars.ALERT_REPOSITORIES }}
           RAW_GITHUB_EMAIL: ${{ vars.RAW_GITHUB_EMAIL }}
+          PROCESS_ONLY_EMAIL_SIGNAL: ${{ vars.PROCESS_ONLY_EMAIL_SIGNAL }}
           DRY_RUN: ${{ vars.DRY_RUN }}
           VULN_SEVERITIES: ${{ vars.VULN_SEVERITIES }}
           BRANCH_PREFIX: ${{ vars.BRANCH_PREFIX }}
@@ -37,6 +39,7 @@ jobs:
           REPO_COMMANDS: ${{ vars.REPO_COMMANDS }}
           INSTALL_RETRY_WITH_LEGACY_PEER_DEPS: ${{ vars.INSTALL_RETRY_WITH_LEGACY_PEER_DEPS }}
           EMAIL_ENABLED: ${{ vars.EMAIL_ENABLED }}
+          EMAIL_FAIL_OPEN: ${{ vars.EMAIL_FAIL_OPEN }}
           EMAIL_TO: ${{ vars.EMAIL_TO }}
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}
           SMTP_HOST: ${{ vars.SMTP_HOST }}

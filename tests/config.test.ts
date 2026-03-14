@@ -7,7 +7,6 @@ const originalEnv = { ...process.env };
 function buildBaseEnv(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   return {
     GITHUB_TOKEN: "ghp_test",
-    ALERT_REPOSITORIES: "owner/repo",
     DRY_RUN: "true",
     VULN_SEVERITIES: "critical,high",
     BRANCH_PREFIX: "chore/security",
@@ -23,15 +22,42 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
+  it("allows empty repository list for auto-discovery mode", () => {
+    process.env = buildBaseEnv();
+
+    const config = loadConfig();
+    expect(config.repositories).toEqual([]);
+  });
+
+  it("extracts advisory signal from RAW_GITHUB_EMAIL", () => {
+    process.env = buildBaseEnv({
+      RAW_GITHUB_EMAIL: "High severity\ntar\nCVE-2026-31802\nAffected Repositories\nowner/repo"
+    });
+
+    const config = loadConfig();
+    expect(config.alertSignal?.cveIds).toEqual(["CVE-2026-31802"]);
+    expect(config.alertSignal?.dependencyNames).toEqual(["tar"]);
+  });
+
   it("allows email fields to be omitted when EMAIL_ENABLED=false", () => {
     process.env = buildBaseEnv();
 
     const config = loadConfig();
 
     expect(config.email.enabled).toBe(false);
+    expect(config.email.failOpen).toBe(true);
     expect(config.email.to).toBe("");
     expect(config.email.from).toBe("");
     expect(config.fixStrategy.retryWithLegacyPeerDeps).toBe(true);
+  });
+
+  it("allows disabling email fail-open", () => {
+    process.env = buildBaseEnv({
+      EMAIL_FAIL_OPEN: "false"
+    });
+
+    const config = loadConfig();
+    expect(config.email.failOpen).toBe(false);
   });
 
   it("allows disabling retry with legacy peer deps", () => {

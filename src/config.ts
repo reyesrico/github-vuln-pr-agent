@@ -1,15 +1,20 @@
 import dotenv from "dotenv";
 import { z } from "zod";
 
-import { extractRepositoriesFromGithubEmail } from "./parsers/githubEmailParser.js";
-import type { FixStrategy, RepoCommands, Severity } from "./types.js";
+import {
+  extractAlertSignalFromGithubEmail,
+  extractRepositoriesFromGithubEmail
+} from "./parsers/githubEmailParser.js";
+import type { AlertSignal, FixStrategy, RepoCommands, Severity } from "./types.js";
 
 dotenv.config({ quiet: true });
 
 const schema = z.object({
   GITHUB_TOKEN: z.string().min(1),
+  ACCOUNT_LOGIN: z.string().optional(),
   ALERT_REPOSITORIES: z.string().optional(),
   RAW_GITHUB_EMAIL: z.string().optional(),
+  PROCESS_ONLY_EMAIL_SIGNAL: z.string().default("true"),
   DRY_RUN: z.string().default("true"),
   VULN_SEVERITIES: z.string().default("critical,high,moderate"),
   BRANCH_PREFIX: z.string().default("chore/security"),
@@ -18,6 +23,7 @@ const schema = z.object({
   INSTALL_RETRY_WITH_LEGACY_PEER_DEPS: z.string().default("true"),
   PREFLIGHT_ONLY: z.string().default("false"),
   EMAIL_ENABLED: z.string().default("true"),
+  EMAIL_FAIL_OPEN: z.string().default("true"),
   EMAIL_TO: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
   SMTP_HOST: z.string().default("smtp-mail.outlook.com"),
@@ -76,7 +82,10 @@ function parseRepositories(raw: z.infer<typeof schema>): string[] {
 
 export interface AppConfig {
   githubToken: string;
+  accountLogin?: string;
   repositories: string[];
+  alertSignal?: AlertSignal;
+  processOnlyEmailSignal: boolean;
   dryRun: boolean;
   severities: Severity[];
   branchPrefix: string;
@@ -86,6 +95,7 @@ export interface AppConfig {
   preflightOnly: boolean;
   email: {
     enabled: boolean;
+    failOpen: boolean;
     to: string;
     from: string;
     host: string;
@@ -99,10 +109,9 @@ export interface AppConfig {
 export function loadConfig(): AppConfig {
   const parsed = schema.parse(process.env);
   const repositories = parseRepositories(parsed);
-
-  if (repositories.length === 0) {
-    throw new Error("No repositories detected. Set ALERT_REPOSITORIES or RAW_GITHUB_EMAIL.");
-  }
+  const alertSignal = parsed.RAW_GITHUB_EMAIL
+    ? extractAlertSignalFromGithubEmail(parsed.RAW_GITHUB_EMAIL)
+    : undefined;
 
   const emailEnabled = parseBoolean(parsed.EMAIL_ENABLED);
   const emailTo = parseOptionalEmail(parsed.EMAIL_TO);
@@ -118,6 +127,7 @@ export function loadConfig(): AppConfig {
 
   const emailConfig: AppConfig["email"] = {
     enabled: emailEnabled,
+    failOpen: parseBoolean(parsed.EMAIL_FAIL_OPEN),
     to: emailTo ?? "",
     from: emailFrom ?? "",
     host: parsed.SMTP_HOST,
@@ -133,9 +143,10 @@ export function loadConfig(): AppConfig {
     emailConfig.pass = parsed.SMTP_PASS;
   }
 
-  return {
+  const config: AppConfig = {
     githubToken: parsed.GITHUB_TOKEN,
     repositories,
+    processOnlyEmailSignal: parseBoolean(parsed.PROCESS_ONLY_EMAIL_SIGNAL),
     dryRun: parseBoolean(parsed.DRY_RUN),
     severities: parseCsv(parsed.VULN_SEVERITIES) as Severity[],
     branchPrefix: parsed.BRANCH_PREFIX,
@@ -147,4 +158,15 @@ export function loadConfig(): AppConfig {
     preflightOnly: parseBoolean(parsed.PREFLIGHT_ONLY),
     email: emailConfig
   };
+
+  const accountLogin = parsed.ACCOUNT_LOGIN?.trim();
+  if (accountLogin) {
+    config.accountLogin = accountLogin;
+  }
+
+  if (alertSignal) {
+    config.alertSignal = alertSignal;
+  }
+
+  return config;
 }

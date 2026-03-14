@@ -13,6 +13,12 @@ export interface DependabotAlert {
   patchedVersion?: string;
 }
 
+export interface AlertSignal {
+  cveIds: string[];
+  ghsaIds: string[];
+  dependencyNames: string[];
+}
+
 export interface RepoCommands {
   install?: string;
   lint?: string;
