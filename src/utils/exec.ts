@@ -3,14 +3,13 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
-function resolveShell(): string | boolean {
+function resolveShell(): string | undefined {
   const configuredShell = process.env.SHELL?.trim();
   if (configuredShell) {
     return configuredShell;
   }
 
-  // Fall back to the platform default shell resolution.
-  return true;
+  return undefined;
 }
 
 export async function runCommand(
