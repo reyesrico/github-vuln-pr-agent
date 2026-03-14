@@ -1,13 +1,13 @@
 # Session Handoff Status
 
 ## Project
-- Repository: https://github.com/reyesrico/github-vuln-pr-agent
-- Local path: /Users/chiquito/Repos/github-vuln-pr-agent
+- Repository: https://github.com/your_account/github-vuln-pr-agent
+- Local path: /path/to/github-vuln-pr-agent
 - Branch: main
-- Latest known commit message: feat: initial vulnerability PR agent
+- Latest known commit message: feat: process only new advisory email alerts with auto repo discovery
 
 ## Objective
-Automate GitHub vulnerability remediation from Dependabot alerts to tested and validated PR creation, then notify by email with merge-ready info.
+Automate remediation from newly received GitHub advisory signals to tested, validated, review-ready PR creation, then notify by email.
 
 ## Implemented
 1. TypeScript project scaffold with strict lint/typecheck/test setup.
@@ -46,7 +46,7 @@ Automate GitHub vulnerability remediation from Dependabot alerts to tested and v
 10. Recommendation E2E simulation flow:
 - Added `.github/docs/E2E_REACT_TEST_SIMULATION_PLAN.md`.
 - Added runnable E2E script `src/e2e/recommendationFlow.ts` and npm script `e2e:recommendation`.
-- Simulated incoming email targeting `reyesrico/react-test`.
+- Simulated incoming email targeting `your_account/repo1`.
 - Executed add-library phase for `is-odd`, created and merged PR #23.
 - Verified notification email delivery via Ethereal preview URL.
 - Executed remove-library phase for `is-odd`, created and merged PR #24.
@@ -59,17 +59,14 @@ Automate GitHub vulnerability remediation from Dependabot alerts to tested and v
 - Added `scripts/set-production-mode.sh` to switch `DRY_RUN=false` and enforce retry fallback.
 - Production run executed successfully with `DRY_RUN=false` and `EMAIL_ENABLED=false`.
 12. Requested SMTP E2E execution:
-- Updated repo scope to include `reyesrico/StuffieReact` in local env and GitHub Actions variable.
-- Ran E2E in `add-only-close` mode for `reyesrico/react-test`.
-- Created PR #25: https://github.com/reyesrico/react-test/pull/25.
-- Closed PR #25 without merge as requested.
-- SMTP delivery blocked because `SMTP_PASS` was not available; findings documented in `.github/docs/E2E_EXECUTION_FINDINGS.md`.
-13. Unattended E2E + production knowledge capture:
-- Added `.env.e2e.example` and `scripts/run-e2e-recommendation.sh` for no-manual local E2E runs.
-- Added `.github/workflows/e2e-recommendation.yml` for unattended GitHub Actions E2E runs.
-- E2E now auto-closes add PR on error (`E2E_AUTO_CLOSE_ON_ERROR=true`).
-- Added `EMAIL_FAIL_OPEN` to production config and workflow wiring.
-- Integrated E2E learnings into production docs and rollout templates.
+- Ran E2E in `add-only-close` mode.
+- Validated create-notify-close behavior.
+- Findings documented in `.github/docs/E2E_EXECUTION_FINDINGS.md`.
+13. Event-driven production mode:
+- Added advisory signal parsing from raw GitHub advisory email.
+- Added `PROCESS_ONLY_EMAIL_SIGNAL=true` gate to avoid backlog processing.
+- Added workflow_dispatch automation inputs (`advisory_email`, `account_login`, `alert_repositories`, `process_only_email_signal`).
+- Updated production rollout/docs to use placeholders only.
 
 ## Testing Status
 Last full quality run passed locally with:
@@ -83,14 +80,15 @@ Test suite status:
 - 14 tests passed
 
 ## Configuration Pending (GitHub side)
-- Current rollout is configured and running in live mode (`DRY_RUN=false`) with `EMAIL_ENABLED=false`.
-- If production email is desired, set `EMAIL_ENABLED=true` and provide SMTP variables/secrets.
+- Keep `DRY_RUN=true` during validation.
+- Use manual dispatch with `advisory_email` for each new advisory event.
+- Switch to `DRY_RUN=false` only after successful dry-run validation.
 
 ## Recommended Next Steps
-1. Tune repository-specific install/test commands to improve fix success rate in target repos.
-2. Enable SMTP configuration and verify real mailbox delivery if required.
-3. Optionally add adaptive fallback (`--force`) for approved repositories only.
-4. Optionally enable auto-merge policy and branch protections.
+1. Tune `REPO_COMMANDS` per repository to improve validation pass rate.
+2. Keep event gate enabled and drive runs from fresh advisory email content.
+3. Move to live mode (`DRY_RUN=false`) after dry-run confidence is achieved.
+4. Optionally enable branch protections and auto-merge policies.
 
 ## How To Resume Quickly In Copilot
 Prompt suggestion:

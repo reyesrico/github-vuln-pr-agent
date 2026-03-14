@@ -1,13 +1,13 @@
 # GitHub Vulnerability PR Agent
 
-Automates security remediation across multiple repositories.
+Automates security remediation across repositories by turning GitHub advisory signals into tested, review-ready pull requests.
 
 ## Prerequisites
 - Node.js 20+
 - npm
 - GitHub CLI (`gh`) installed and authenticated
 - Git configured locally
-- For real email delivery: Outlook/Hotmail app password (`SMTP_PASS`)
+- SMTP account credentials for outbound notification email (`SMTP_USER` and `SMTP_PASS`)
 
 ## Project Setup
 1. Install dependencies:
@@ -24,34 +24,42 @@ cp .env.example .env
 
 3. Fill `.env` with required values:
 - `GITHUB_TOKEN`
-- `ALERT_REPOSITORIES`
-- Optional SMTP fields when `EMAIL_ENABLED=true`
+- `ACCOUNT_LOGIN` (recommended for auto-discovery mode)
+- SMTP fields when `EMAIL_ENABLED=true`
 
-4. Validate configuration and quality:
+4. Choose repository selection mode:
+- Explicit list mode: set `ALERT_REPOSITORIES=owner/repo1,owner/repo2`
+- Event mode (recommended): set `RAW_GITHUB_EMAIL` with a fresh advisory email payload
+- Auto-discovery mode: leave both empty and use `ACCOUNT_LOGIN` to scope owned repos
+
+5. Keep backlog noise disabled:
+- `PROCESS_ONLY_EMAIL_SIGNAL=true` means the agent only processes alerts when a new advisory signal exists in `RAW_GITHUB_EMAIL`.
+
+6. Validate configuration and quality:
 
 ```bash
 npm run preflight
 npm run check
 ```
 
-5. Start the agent locally:
+7. Start the agent locally:
 
 ```bash
 npm run dev
 ```
 
 ## Why The Env File Is Important
-- `.env` is the single source of truth for local development and E2E simulation (repository scope, dry-run/live mode, severities, retry strategy, email delivery, E2E options).
+- `.env` is the single source of truth for local development and E2E simulation.
 - Incorrect values can stop PR creation or prevent notifications.
 - Keep `.env` outside version control and treat it as sensitive.
 
 ## What it does
-- Reads open Dependabot alerts for configured repositories.
+- Reads Dependabot alerts and filters them using either explicit repo scope or advisory-email signal.
 - Creates a branch with the dependency bump to the patched version.
 - Runs lint and test commands.
 - Validates that security-relevant files changed.
-- Creates a pull request.
-- Sends an email report with PR links and merge commands.
+- Creates a pull request when checks pass.
+- Sends an email report with PR links and merge commands only for processed alerts.
 
 ## Multi-agent pipeline
 - Fix Agent: applies dependency update in a branch.
@@ -59,18 +67,28 @@ npm run dev
 - Validation Agent: verifies branch readiness.
 - Orchestrator Agent: coordinates all steps and notifications.
 
-## Email configuration (Hotmail/Live)
-- SMTP host default: `smtp-mail.outlook.com`
-- SMTP port default: `587`
-- TLS mode: `SMTP_SECURE=false` (STARTTLS on port 587)
-- `EMAIL_TO` default is `alerts@example.com`
+## Event-Driven Production Model
+1. A fresh GitHub advisory email arrives.
+2. Paste the raw advisory email text into workflow input `advisory_email` (manual dispatch), or set `RAW_GITHUB_EMAIL` variable before run.
+3. Agent extracts advisory signal (CVE/GHSA/dependency + repositories).
+4. Agent processes only matching alerts for that signal.
+5. PRs that pass fix, test, and validation are created as ready-to-review.
+6. Email report is sent with repository, alert, status, and PR links.
+
+## Email Configuration
+- Set `EMAIL_TO` to the review inbox.
+- Set `EMAIL_FROM` to the sender address.
+- Set SMTP values (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`) for your email provider.
 
 ## GitHub Actions setup
 Use [./.github/workflows/security-pr-agent.yml](.github/workflows/security-pr-agent.yml).
 Use [./scripts/rollout-actions.sh](scripts/rollout-actions.sh) to configure variables and secrets automatically.
 
 Add repository variables:
-- `ALERT_REPOSITORIES`
+- `ACCOUNT_LOGIN` (recommended)
+- `ALERT_REPOSITORIES` (optional)
+- `RAW_GITHUB_EMAIL` (optional)
+- `PROCESS_ONLY_EMAIL_SIGNAL`
 - `DRY_RUN`
 - `VULN_SEVERITIES`
 - `BRANCH_PREFIX`
@@ -113,16 +131,32 @@ Production mode command:
 ./scripts/rollout-actions.sh owner/repo .env
 ```
 
-2. Switch to live mode:
+2. Keep event gate enabled:
+
+```bash
+# in GitHub Variables
+PROCESS_ONLY_EMAIL_SIGNAL=true
+```
+
+3. Switch to live mode:
 
 ```bash
 ./scripts/set-production-mode.sh owner/repo --enable-email
 ```
 
-3. Trigger workflow:
+4. Trigger workflow:
 
 ```bash
 gh workflow run security-pr-agent.yml --repo owner/repo
+```
+
+Manual event-driven dispatch with advisory text:
+
+```bash
+gh workflow run security-pr-agent.yml \
+	--repo owner/repo \
+	-f advisory_email="$(cat advisory-email.txt)" \
+	-f process_only_email_signal=true
 ```
 
 ## Notes
@@ -132,6 +166,7 @@ gh workflow run security-pr-agent.yml --repo owner/repo
 - Merge shortcut is included in the email as a GitHub CLI command.
 - Email reports include failure category for faster production triage.
 - `EMAIL_FAIL_OPEN=true` keeps production remediation running even if email provider is temporarily down.
+- `PROCESS_ONLY_EMAIL_SIGNAL=true` prevents processing old pending alerts when no new advisory signal is present.
 - Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.
 
 ## E2E Recommendation Simulation
@@ -153,7 +188,7 @@ Unattended GitHub Actions run:
 - Trigger with `workflow_dispatch` after setting `E2E_*` variables and shared `EMAIL_*` / `SMTP_*` runtime values.
 
 - Optional overrides:
-- `E2E_TARGET_REPO` (default `reyesrico/react-test`)
+- `E2E_TARGET_REPO` (default `your_account/repo1`)
 - `E2E_LIBRARY` (default `is-odd`)
 - `E2E_LIBRARY_VERSION` (default `3.0.1`)
 - `E2E_EMAIL_MODE` (`ethereal`, `smtp`, or `off`; default `ethereal`)

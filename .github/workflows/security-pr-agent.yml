@@ -4,6 +4,24 @@ on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
+    inputs:
+      advisory_email:
+        description: "Optional raw GitHub advisory email text. When provided, only matching new advisory alerts are processed."
+        required: false
+        type: string
+      account_login:
+        description: "Optional account/org login to scope auto-discovered repositories."
+        required: false
+        type: string
+      alert_repositories:
+        description: "Optional comma-separated repository list (owner/repo)."
+        required: false
+        type: string
+      process_only_email_signal:
+        description: "When true, skip processing unless advisory_email (or RAW_GITHUB_EMAIL variable) provides a signal."
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   run-agent:
@@ -28,10 +46,10 @@ jobs:
       - name: Run vulnerability PR agent
         env:
           GITHUB_TOKEN: ${{ secrets.SECURITY_AGENT_GITHUB_TOKEN }}
-          ACCOUNT_LOGIN: ${{ vars.ACCOUNT_LOGIN }}
-          ALERT_REPOSITORIES: ${{ vars.ALERT_REPOSITORIES }}
-          RAW_GITHUB_EMAIL: ${{ vars.RAW_GITHUB_EMAIL }}
-          PROCESS_ONLY_EMAIL_SIGNAL: ${{ vars.PROCESS_ONLY_EMAIL_SIGNAL }}
+          ACCOUNT_LOGIN: ${{ inputs.account_login || vars.ACCOUNT_LOGIN }}
+          ALERT_REPOSITORIES: ${{ inputs.alert_repositories || vars.ALERT_REPOSITORIES }}
+          RAW_GITHUB_EMAIL: ${{ inputs.advisory_email || vars.RAW_GITHUB_EMAIL }}
+          PROCESS_ONLY_EMAIL_SIGNAL: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.process_only_email_signal) || vars.PROCESS_ONLY_EMAIL_SIGNAL }}
           DRY_RUN: ${{ vars.DRY_RUN }}
           VULN_SEVERITIES: ${{ vars.VULN_SEVERITIES }}
           BRANCH_PREFIX: ${{ vars.BRANCH_PREFIX }}

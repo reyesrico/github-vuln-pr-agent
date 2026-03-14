@@ -1,15 +1,15 @@
 # End-to-End Plan: Simulated Recommendation Flow (react-test)
 
 ## Objective
-Validate an end-to-end non-vulnerability workflow by simulating an incoming recommendation email, applying a safe dependency change in `reyesrico/react-test`, creating a PR, sending an email notification with the PR URL, and then closing the PR without merging.
+Validate an end-to-end non-vulnerability workflow by simulating an incoming recommendation email, applying a safe dependency change in `your_account/repo1`, creating a PR, sending an email notification with the PR URL, and then closing the PR without merging.
 
 ## Proposed Small Library
 - Library: `is-odd`
 - Why: very small, stable, npm-friendly, minimal installation risk.
 
 ## Scope
-- Target repository: `reyesrico/react-test`
-- Simulation input: raw email text containing `reyesrico/react-test`
+- Target repository: `your_account/repo1`
+- Simulation input: raw email text containing `your_account/repo1`
 - Change: add `is-odd`
 - Cleanup: close PR after notification (no merge, no uninstall)
 
@@ -23,12 +23,12 @@ Validate an end-to-end non-vulnerability workflow by simulating an incoming reco
 
 ## Test Flow
 1. Simulate incoming recommendation email:
-- Example payload includes text like: `Recommendation: add is-odd to reyesrico/react-test`.
+- Example payload includes text like: `Recommendation: add is-odd to your_account/repo1`.
 - Parse repository from email payload.
-- Assert extracted repository includes `reyesrico/react-test`.
+- Assert extracted repository includes `your_account/repo1`.
 
 2. Add-library phase:
-- Clone `reyesrico/react-test`.
+- Clone `your_account/repo1`.
 - Create branch `e2e/recommend-add-is-odd-<timestamp>`.
 - Run `npm install is-odd --save-exact`.
 - Run quality commands (`npm run lint --if-present` and `npm test --if-present`).
@@ -46,7 +46,7 @@ Validate an end-to-end non-vulnerability workflow by simulating an incoming reco
 - Confirm PR state is `closed`.
 
 ## Expected Outcomes
-1. Repository parser accepts simulated email and resolves `reyesrico/react-test`.
+1. Repository parser accepts simulated email and resolves `your_account/repo1`.
 2. One add PR is created successfully for `is-odd`.
 3. Notification email is sent with PR URL and recommendation text.
 4. PR is closed after notification.

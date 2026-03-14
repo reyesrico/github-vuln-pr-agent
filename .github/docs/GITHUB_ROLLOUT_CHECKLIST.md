@@ -19,7 +19,8 @@ Token guidance:
 Repository Settings -> Secrets and variables -> Actions -> Variables
 
 Required core variables:
-- ALERT_REPOSITORIES
+- ACCOUNT_LOGIN
+- PROCESS_ONLY_EMAIL_SIGNAL
 - DRY_RUN
 - VULN_SEVERITIES
 - BRANCH_PREFIX
@@ -32,12 +33,19 @@ Required core variables:
 - SMTP_PORT
 - SMTP_SECURE
 
+Optional scope variables:
+- ALERT_REPOSITORIES
+- RAW_GITHUB_EMAIL
+
 Conditional variables (only when EMAIL_ENABLED=true):
 - EMAIL_TO
 - EMAIL_FROM
 
 Recommended starter values:
-- ALERT_REPOSITORIES=reyesrico/CovidCharts,reyesrico/workshop-app,reyesrico/react-test,reyesrico/StuffieReact
+- ACCOUNT_LOGIN=your_account
+- PROCESS_ONLY_EMAIL_SIGNAL=true
+- ALERT_REPOSITORIES=
+- RAW_GITHUB_EMAIL=
 - DRY_RUN=true
 - VULN_SEVERITIES=critical,high,moderate
 - BRANCH_PREFIX=chore/security
@@ -48,9 +56,9 @@ Recommended starter values:
 - EMAIL_FAIL_OPEN=true
 - EMAIL_TO=alerts@example.com
 - EMAIL_FROM=sender@example.com
-- SMTP_HOST=smtp-mail.outlook.com
-- SMTP_PORT=587
-- SMTP_SECURE=false
+- SMTP_HOST=smtp.example.com
+- SMTP_PORT=465
+- SMTP_SECURE=true
 
 ## 3. Local Preflight Validation
 
@@ -67,7 +75,8 @@ Expected behavior:
 
 - Keep DRY_RUN=true.
 - Trigger workflow manually from Actions -> Security PR Agent -> Run workflow.
-- Validate logs show repository processing and no auth/config failures.
+- For event-driven validation, pass `advisory_email` input in workflow dispatch.
+- Validate logs show `emailSignalActive: true` and only matching alerts are processed.
 
 ## 5. Verify Outputs
 
@@ -99,3 +108,8 @@ Add these optional variables for `.github/workflows/e2e-recommendation.yml`:
 - E2E_AUTO_CLOSE_ON_ERROR
 
 Reuse SMTP and EMAIL variables/secrets from the main workflow.
+
+## 9. Recommended Production Pattern
+1. Keep `PROCESS_ONLY_EMAIL_SIGNAL=true`.
+2. Trigger workflow with `advisory_email` input when a fresh GitHub advisory email arrives.
+3. Review resulting PR links from notification email.
