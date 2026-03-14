@@ -25,6 +25,7 @@ Automates security remediation across multiple repositories.
 
 ```bash
 npm install
+npm run preflight
 npm run check
 npm run dev
 ```
@@ -37,6 +38,7 @@ npm run dev
 
 ## GitHub Actions setup
 Use [./.github/workflows/security-pr-agent.yml](.github/workflows/security-pr-agent.yml).
+Use [./scripts/rollout-actions.sh](scripts/rollout-actions.sh) to configure variables and secrets automatically.
 
 Add repository variables:
 - `ALERT_REPOSITORIES`
@@ -46,18 +48,25 @@ Add repository variables:
 - `MAX_ALERTS_PER_REPO`
 - `REPO_COMMANDS`
 - `EMAIL_ENABLED`
-- `EMAIL_TO`
-- `EMAIL_FROM`
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_SECURE`
+- `EMAIL_TO` (required when `EMAIL_ENABLED=true`)
+- `EMAIL_FROM` (required when `EMAIL_ENABLED=true`)
 
 Add repository secrets:
 - `SECURITY_AGENT_GITHUB_TOKEN`
-- `SMTP_USER`
-- `SMTP_PASS`
+- `SMTP_USER` (required when `EMAIL_ENABLED=true`)
+- `SMTP_PASS` (required when `EMAIL_ENABLED=true`)
+
+Automated rollout command:
+
+```bash
+./scripts/rollout-actions.sh owner/repo .env --dispatch
+```
 
 ## Notes
 - Start with `DRY_RUN=true` until you validate behavior.
 - For repositories with custom command needs, set `REPO_COMMANDS` as JSON.
 - Merge shortcut is included in the email as a GitHub CLI command.
+- Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.

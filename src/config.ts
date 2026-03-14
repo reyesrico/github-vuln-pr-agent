@@ -4,7 +4,7 @@ import { z } from "zod";
 import { extractRepositoriesFromGithubEmail } from "./parsers/githubEmailParser.js";
 import type { RepoCommands, Severity } from "./types.js";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const schema = z.object({
   GITHUB_TOKEN: z.string().min(1),
@@ -15,9 +15,10 @@ const schema = z.object({
   BRANCH_PREFIX: z.string().default("chore/security"),
   MAX_ALERTS_PER_REPO: z.string().default("3"),
   REPO_COMMANDS: z.string().default("{}"),
+  PREFLIGHT_ONLY: z.string().default("false"),
   EMAIL_ENABLED: z.string().default("true"),
-  EMAIL_TO: z.string().email(),
-  EMAIL_FROM: z.string().email(),
+  EMAIL_TO: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
   SMTP_HOST: z.string().default("smtp-mail.outlook.com"),
   SMTP_PORT: z.string().default("587"),
   SMTP_SECURE: z.string().default("false"),
@@ -45,6 +46,24 @@ function parseRepoCommands(raw: string): Record<string, RepoCommands> {
   }
 }
 
+function parseOptionalEmail(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const validated = z.string().email().safeParse(trimmed);
+  if (!validated.success) {
+    throw new Error(`Invalid email address: ${trimmed}`);
+  }
+
+  return trimmed;
+}
+
 function parseRepositories(raw: z.infer<typeof schema>): string[] {
   const configured = raw.ALERT_REPOSITORIES ? parseCsv(raw.ALERT_REPOSITORIES) : [];
   const fromEmail = raw.RAW_GITHUB_EMAIL
@@ -62,6 +81,7 @@ export interface AppConfig {
   branchPrefix: string;
   maxAlertsPerRepo: number;
   repoCommands: Record<string, RepoCommands>;
+  preflightOnly: boolean;
   email: {
     enabled: boolean;
     to: string;
@@ -83,14 +103,21 @@ export function loadConfig(): AppConfig {
   }
 
   const emailEnabled = parseBoolean(parsed.EMAIL_ENABLED);
+  const emailTo = parseOptionalEmail(parsed.EMAIL_TO);
+  const emailFrom = parseOptionalEmail(parsed.EMAIL_FROM);
+
+  if (emailEnabled && (!emailTo || !emailFrom)) {
+    throw new Error("EMAIL_TO and EMAIL_FROM are required when EMAIL_ENABLED=true.");
+  }
+
   if (emailEnabled && (!parsed.SMTP_USER || !parsed.SMTP_PASS)) {
     throw new Error("SMTP_USER and SMTP_PASS are required when EMAIL_ENABLED=true.");
   }
 
   const emailConfig: AppConfig["email"] = {
     enabled: emailEnabled,
-    to: parsed.EMAIL_TO,
-    from: parsed.EMAIL_FROM,
+    to: emailTo ?? "",
+    from: emailFrom ?? "",
     host: parsed.SMTP_HOST,
     port: Number(parsed.SMTP_PORT),
     secure: parseBoolean(parsed.SMTP_SECURE)
@@ -112,6 +139,7 @@ export function loadConfig(): AppConfig {
     branchPrefix: parsed.BRANCH_PREFIX,
     maxAlertsPerRepo: Number(parsed.MAX_ALERTS_PER_REPO),
     repoCommands: parseRepoCommands(parsed.REPO_COMMANDS),
+    preflightOnly: parseBoolean(parsed.PREFLIGHT_ONLY),
     email: emailConfig
   };
 }
