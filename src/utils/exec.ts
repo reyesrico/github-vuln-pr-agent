@@ -3,6 +3,16 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
+function resolveShell(): string | boolean {
+  const configuredShell = process.env.SHELL?.trim();
+  if (configuredShell) {
+    return configuredShell;
+  }
+
+  // Fall back to the platform default shell resolution.
+  return true;
+}
+
 export async function runCommand(
   command: string,
   cwd: string
@@ -10,7 +20,7 @@ export async function runCommand(
   try {
     const result = await execAsync(command, {
       cwd,
-      shell: "/bin/zsh",
+      shell: resolveShell(),
       maxBuffer: 10 * 1024 * 1024
     });
     return {
