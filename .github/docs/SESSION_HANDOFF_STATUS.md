@@ -51,6 +51,13 @@ Automate GitHub vulnerability remediation from Dependabot alerts to tested and v
 - Verified notification email delivery via Ethereal preview URL.
 - Executed remove-library phase for `is-odd`, created and merged PR #24.
 - Verified second notification email delivery via Ethereal preview URL.
+11. Production hardening:
+- Added install fallback strategy: retries `npm install` with `--legacy-peer-deps` when enabled.
+- New variable: `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS`.
+- Added failure category classification for failed alerts.
+- Email report now includes `Failure Category` column.
+- Added `scripts/set-production-mode.sh` to switch `DRY_RUN=false` and enforce retry fallback.
+- Production run executed successfully with `DRY_RUN=false` and `EMAIL_ENABLED=false`.
 
 ## Testing Status
 Last full quality run passed locally with:
@@ -60,17 +67,17 @@ Last full quality run passed locally with:
 - npm run check
 
 Test suite status:
-- 4 test files
-- 9 tests passed
+- 5 test files
+- 14 tests passed
 
 ## Configuration Pending (GitHub side)
-- Current rollout is configured and running in dry-run mode with `EMAIL_ENABLED=false`.
+- Current rollout is configured and running in live mode (`DRY_RUN=false`) with `EMAIL_ENABLED=false`.
 - If production email is desired, set `EMAIL_ENABLED=true` and provide SMTP variables/secrets.
 
 ## Recommended Next Steps
-1. Tune dependency-fix strategy for peer-dependency conflicts (ERESOLVE) in target repos.
+1. Tune repository-specific install/test commands to improve fix success rate in target repos.
 2. Enable SMTP configuration and verify real mailbox delivery if required.
-3. Switch `DRY_RUN=false` when ready for real PR creation in orchestrator workflow.
+3. Optionally add adaptive fallback (`--force`) for approved repositories only.
 4. Optionally enable auto-merge policy and branch protections.
 
 ## How To Resume Quickly In Copilot
