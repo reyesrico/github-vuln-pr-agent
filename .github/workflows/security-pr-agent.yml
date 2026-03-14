@@ -35,6 +35,7 @@ jobs:
           BRANCH_PREFIX: ${{ vars.BRANCH_PREFIX }}
           MAX_ALERTS_PER_REPO: ${{ vars.MAX_ALERTS_PER_REPO }}
           REPO_COMMANDS: ${{ vars.REPO_COMMANDS }}
+          INSTALL_RETRY_WITH_LEGACY_PEER_DEPS: ${{ vars.INSTALL_RETRY_WITH_LEGACY_PEER_DEPS }}
           EMAIL_ENABLED: ${{ vars.EMAIL_ENABLED }}
           EMAIL_TO: ${{ vars.EMAIL_TO }}
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}

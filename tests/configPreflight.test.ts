@@ -12,6 +12,9 @@ function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     branchPrefix: "chore/security",
     maxAlertsPerRepo: 3,
     repoCommands: {},
+    fixStrategy: {
+      retryWithLegacyPeerDeps: true
+    },
     preflightOnly: true,
     email: {
       enabled: false,
@@ -36,6 +39,7 @@ describe("buildConfigPreflight", () => {
     expect(preflight.mode).toBe("dry-run");
     expect(preflight.preflightOnly).toBe(true);
     expect(preflight.repositories).toEqual({ count: 1, sample: ["owner/repo"] });
+    expect(preflight.fixStrategy).toEqual({ retryWithLegacyPeerDeps: true });
   });
 
   it("reports missing email and smtp keys when email is enabled", () => {

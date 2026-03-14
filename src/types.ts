@@ -19,6 +19,10 @@ export interface RepoCommands {
   test?: string;
 }
 
+export interface FixStrategy {
+  retryWithLegacyPeerDeps: boolean;
+}
+
 export interface FixInput {
   repoFullName: string;
   alert: DependabotAlert;
@@ -26,6 +30,7 @@ export interface FixInput {
   githubToken: string;
   dryRun: boolean;
   commands: RepoCommands;
+  strategy: FixStrategy;
 }
 
 export interface FixResult {
@@ -63,10 +68,20 @@ export interface PullRequestResult {
   title: string;
 }
 
+export type FailureCategory =
+  | "clone"
+  | "install"
+  | "test"
+  | "validation"
+  | "pr"
+  | "config"
+  | "unknown";
+
 export interface ProcessedAlertResult {
   repoFullName: string;
   alert: DependabotAlert;
   status: "created" | "skipped" | "failed";
   details: string;
+  failureCategory?: FailureCategory;
   pullRequest?: PullRequestResult;
 }

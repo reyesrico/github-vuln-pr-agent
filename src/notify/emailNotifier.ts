@@ -28,6 +28,7 @@ function buildHtmlReport(results: ProcessedAlertResult[]): string {
 <td>${result.alert.dependencyName}</td>
 <td>${result.alert.cveId ?? result.alert.ghsaId}</td>
 <td>${result.status}</td>
+    <td>${result.failureCategory ?? "N/A"}</td>
 <td>${prLink}</td>
 <td><code>${mergeCommand}</code></td>
 <td>${result.details}</td>
@@ -45,6 +46,7 @@ function buildHtmlReport(results: ProcessedAlertResult[]): string {
 <th>Dependency</th>
 <th>Advisory</th>
 <th>Status</th>
+<th>Failure Category</th>
 <th>Pull Request</th>
 <th>Merge Command</th>
 <th>Details</th>

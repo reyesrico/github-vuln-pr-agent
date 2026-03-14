@@ -31,6 +31,16 @@ describe("loadConfig", () => {
     expect(config.email.enabled).toBe(false);
     expect(config.email.to).toBe("");
     expect(config.email.from).toBe("");
+    expect(config.fixStrategy.retryWithLegacyPeerDeps).toBe(true);
+  });
+
+  it("allows disabling retry with legacy peer deps", () => {
+    process.env = buildBaseEnv({
+      INSTALL_RETRY_WITH_LEGACY_PEER_DEPS: "false"
+    });
+
+    const config = loadConfig();
+    expect(config.fixStrategy.retryWithLegacyPeerDeps).toBe(false);
   });
 
   it("requires EMAIL_TO and EMAIL_FROM when EMAIL_ENABLED=true", () => {

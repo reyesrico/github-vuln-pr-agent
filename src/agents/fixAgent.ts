@@ -18,6 +18,22 @@ function parseChangedFiles(statusOutput: string): string[] {
     .filter(Boolean);
 }
 
+function isNpmInstallCommand(command: string): boolean {
+  return /(^|\s)npm\s+install(\s|$)/.test(command);
+}
+
+function canRetryWithLegacyPeerDeps(command: string): boolean {
+  if (!isNpmInstallCommand(command)) {
+    return false;
+  }
+
+  return !command.includes("--legacy-peer-deps");
+}
+
+function withLegacyPeerDeps(command: string): string {
+  return `${command} --legacy-peer-deps`;
+}
+
 export class FixAgent {
   async applyFix(input: FixInput): Promise<FixResult> {
     if (!input.alert.patchedVersion) {
@@ -56,7 +72,23 @@ export class FixAgent {
     const installCommand = input.commands.install
       ? input.commands.install
       : `npm install ${input.alert.dependencyName}@${input.alert.patchedVersion} --package-lock-only`;
-    const installResult = await runCommand(installCommand, repoDir);
+
+    let installResult = await runCommand(installCommand, repoDir);
+    if (!installResult.success && input.strategy.retryWithLegacyPeerDeps) {
+      if (canRetryWithLegacyPeerDeps(installCommand)) {
+        const retryCommand = withLegacyPeerDeps(installCommand);
+        const retryResult = await runCommand(retryCommand, repoDir);
+
+        if (retryResult.success) {
+          installResult = retryResult;
+        } else {
+          throw new Error(
+            `Dependency update failed after retry: ${installResult.output}\nRetry (${retryCommand}) failed: ${retryResult.output}`
+          );
+        }
+      }
+    }
+
     if (!installResult.success) {
       throw new Error(`Dependency update failed: ${installResult.output}`);
     }

@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import { z } from "zod";
 
 import { extractRepositoriesFromGithubEmail } from "./parsers/githubEmailParser.js";
-import type { RepoCommands, Severity } from "./types.js";
+import type { FixStrategy, RepoCommands, Severity } from "./types.js";
 
 dotenv.config({ quiet: true });
 
@@ -15,6 +15,7 @@ const schema = z.object({
   BRANCH_PREFIX: z.string().default("chore/security"),
   MAX_ALERTS_PER_REPO: z.string().default("3"),
   REPO_COMMANDS: z.string().default("{}"),
+  INSTALL_RETRY_WITH_LEGACY_PEER_DEPS: z.string().default("true"),
   PREFLIGHT_ONLY: z.string().default("false"),
   EMAIL_ENABLED: z.string().default("true"),
   EMAIL_TO: z.string().optional(),
@@ -81,6 +82,7 @@ export interface AppConfig {
   branchPrefix: string;
   maxAlertsPerRepo: number;
   repoCommands: Record<string, RepoCommands>;
+  fixStrategy: FixStrategy;
   preflightOnly: boolean;
   email: {
     enabled: boolean;
@@ -139,6 +141,9 @@ export function loadConfig(): AppConfig {
     branchPrefix: parsed.BRANCH_PREFIX,
     maxAlertsPerRepo: Number(parsed.MAX_ALERTS_PER_REPO),
     repoCommands: parseRepoCommands(parsed.REPO_COMMANDS),
+    fixStrategy: {
+      retryWithLegacyPeerDeps: parseBoolean(parsed.INSTALL_RETRY_WITH_LEGACY_PEER_DEPS)
+    },
     preflightOnly: parseBoolean(parsed.PREFLIGHT_ONLY),
     email: emailConfig
   };

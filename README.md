@@ -47,6 +47,7 @@ Add repository variables:
 - `BRANCH_PREFIX`
 - `MAX_ALERTS_PER_REPO`
 - `REPO_COMMANDS`
+- `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS`
 - `EMAIL_ENABLED`
 - `SMTP_HOST`
 - `SMTP_PORT`
@@ -65,10 +66,18 @@ Automated rollout command:
 ./scripts/rollout-actions.sh owner/repo .env --dispatch
 ```
 
+Production mode command:
+
+```bash
+./scripts/set-production-mode.sh owner/repo --enable-email
+```
+
 ## Notes
 - Start with `DRY_RUN=true` until you validate behavior.
 - For repositories with custom command needs, set `REPO_COMMANDS` as JSON.
+- Install retries can automatically fall back to `--legacy-peer-deps` when `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true`.
 - Merge shortcut is included in the email as a GitHub CLI command.
+- Email reports include failure category for faster production triage.
 - Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.
 
 ## E2E Recommendation Simulation

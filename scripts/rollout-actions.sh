@@ -65,6 +65,7 @@ require_env VULN_SEVERITIES
 require_env BRANCH_PREFIX
 require_env MAX_ALERTS_PER_REPO
 require_env REPO_COMMANDS
+require_env INSTALL_RETRY_WITH_LEGACY_PEER_DEPS
 require_env EMAIL_ENABLED
 require_env SMTP_HOST
 require_env SMTP_PORT
@@ -78,6 +79,7 @@ set_var VULN_SEVERITIES
 set_var BRANCH_PREFIX
 set_var MAX_ALERTS_PER_REPO
 set_var REPO_COMMANDS
+set_var INSTALL_RETRY_WITH_LEGACY_PEER_DEPS
 set_var EMAIL_ENABLED
 set_var SMTP_HOST
 set_var SMTP_PORT

@@ -8,6 +8,7 @@ import {
 import { sendEmailNotification } from "../notify/emailNotifier.js";
 import type { AppConfig } from "../config.js";
 import type { ProcessedAlertResult } from "../types.js";
+import { classifyFailure } from "../utils/failureClassification.js";
 import { logError, logInfo, logWarn } from "../utils/logger.js";
 import { FixAgent } from "./fixAgent.js";
 import { TestAgent } from "./testAgent.js";
@@ -81,7 +82,8 @@ export class Orchestrator {
             branchPrefix: config.branchPrefix,
             githubToken: config.githubToken,
             dryRun: config.dryRun,
-            commands
+            commands,
+            strategy: config.fixStrategy
           });
 
           if (fixResult.skipped) {
@@ -107,7 +109,8 @@ export class Orchestrator {
               repoFullName,
               alert,
               status: "failed",
-              details: validation.reasons.join("; ")
+              details: validation.reasons.join("; "),
+              failureCategory: "validation"
             });
             continue;
           }
@@ -173,7 +176,8 @@ export class Orchestrator {
             repoFullName,
             alert,
             status: "failed",
-            details: message
+            details: message,
+            failureCategory: classifyFailure(message)
           });
         }
       }

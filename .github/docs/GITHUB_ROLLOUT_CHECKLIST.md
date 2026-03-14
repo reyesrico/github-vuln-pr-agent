@@ -25,6 +25,7 @@ Required core variables:
 - BRANCH_PREFIX
 - MAX_ALERTS_PER_REPO
 - REPO_COMMANDS
+- INSTALL_RETRY_WITH_LEGACY_PEER_DEPS
 - EMAIL_ENABLED
 - SMTP_HOST
 - SMTP_PORT
@@ -41,6 +42,7 @@ Recommended starter values:
 - BRANCH_PREFIX=chore/security
 - MAX_ALERTS_PER_REPO=3
 - REPO_COMMANDS={}
+- INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true
 - EMAIL_ENABLED=true
 - EMAIL_TO=reyesrico@hotmail.com
 - EMAIL_FROM=reyesrico@hotmail.com

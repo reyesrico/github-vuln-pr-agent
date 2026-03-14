@@ -44,6 +44,9 @@ export function buildConfigPreflight(
     branchPrefix: config.branchPrefix,
     maxAlertsPerRepo: config.maxAlertsPerRepo,
     repoCommandOverrides: Object.keys(config.repoCommands).length,
+    fixStrategy: {
+      retryWithLegacyPeerDeps: config.fixStrategy.retryWithLegacyPeerDeps
+    },
     auth: {
       githubTokenConfigured: hasValue(env.GITHUB_TOKEN)
     },
