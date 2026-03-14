@@ -2,6 +2,49 @@
 
 Automates security remediation across multiple repositories.
 
+## Prerequisites
+- Node.js 20+
+- npm
+- GitHub CLI (`gh`) installed and authenticated
+- Git configured locally
+- For real email delivery: Outlook/Hotmail app password (`SMTP_PASS`)
+
+## Project Setup
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Create local runtime env file:
+
+```bash
+cp .env.example .env
+```
+
+3. Fill `.env` with required values:
+- `GITHUB_TOKEN`
+- `ALERT_REPOSITORIES`
+- Optional SMTP fields when `EMAIL_ENABLED=true`
+
+4. Validate configuration and quality:
+
+```bash
+npm run preflight
+npm run check
+```
+
+5. Start the agent locally:
+
+```bash
+npm run dev
+```
+
+## Why The Env File Is Important
+- `.env` controls runtime behavior (repository scope, dry-run/live mode, severities, retry strategy, email delivery).
+- Incorrect values can stop PR creation or prevent notifications.
+- Keep `.env` outside version control and treat it as sensitive.
+
 ## What it does
 - Reads open Dependabot alerts for configured repositories.
 - Creates a branch with the dependency bump to the patched version.
@@ -15,20 +58,6 @@ Automates security remediation across multiple repositories.
 - Test Agent: runs lint/test commands.
 - Validation Agent: verifies branch readiness.
 - Orchestrator Agent: coordinates all steps and notifications.
-
-## Quick start
-1. Copy `.env.example` to `.env`.
-2. Set `GITHUB_TOKEN` with access to all target repos.
-3. Set `ALERT_REPOSITORIES` or `RAW_GITHUB_EMAIL`.
-4. Configure Outlook/Hotmail SMTP credentials.
-5. Run:
-
-```bash
-npm install
-npm run preflight
-npm run check
-npm run dev
-```
 
 ## Email configuration (Hotmail/Live)
 - SMTP host default: `smtp-mail.outlook.com`
@@ -60,6 +89,10 @@ Add repository secrets:
 - `SMTP_USER` (required when `EMAIL_ENABLED=true`)
 - `SMTP_PASS` (required when `EMAIL_ENABLED=true`)
 
+Production settings location:
+- GitHub repository -> Settings -> Secrets and variables -> Actions
+- Full rollout guide: [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md)
+
 Automated rollout command:
 
 ```bash
@@ -70,6 +103,25 @@ Production mode command:
 
 ```bash
 ./scripts/set-production-mode.sh owner/repo --enable-email
+```
+
+## How To Start In Production
+1. Configure variables/secrets from `.env`:
+
+```bash
+./scripts/rollout-actions.sh owner/repo .env
+```
+
+2. Switch to live mode:
+
+```bash
+./scripts/set-production-mode.sh owner/repo --enable-email
+```
+
+3. Trigger workflow:
+
+```bash
+gh workflow run security-pr-agent.yml --repo owner/repo
 ```
 
 ## Notes
@@ -93,3 +145,4 @@ GITHUB_TOKEN="$(gh auth token)" npm run e2e:recommendation
 - `E2E_LIBRARY` (default `is-odd`)
 - `E2E_LIBRARY_VERSION` (default `3.0.1`)
 - `E2E_EMAIL_MODE` (`ethereal`, `smtp`, or `off`; default `ethereal`)
+- `E2E_FLOW_MODE` (`add-only-close` or `add-remove-merge`; default `add-only-close`)

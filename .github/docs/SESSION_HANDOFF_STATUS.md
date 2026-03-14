@@ -58,6 +58,12 @@ Automate GitHub vulnerability remediation from Dependabot alerts to tested and v
 - Email report now includes `Failure Category` column.
 - Added `scripts/set-production-mode.sh` to switch `DRY_RUN=false` and enforce retry fallback.
 - Production run executed successfully with `DRY_RUN=false` and `EMAIL_ENABLED=false`.
+12. Requested SMTP E2E execution:
+- Updated repo scope to include `reyesrico/StuffieReact` in local env and GitHub Actions variable.
+- Ran E2E in `add-only-close` mode for `reyesrico/react-test`.
+- Created PR #25: https://github.com/reyesrico/react-test/pull/25.
+- Closed PR #25 without merge as requested.
+- SMTP delivery blocked because `SMTP_PASS` was not available; findings documented in `.github/docs/E2E_EXECUTION_FINDINGS.md`.
 
 ## Testing Status
 Last full quality run passed locally with:

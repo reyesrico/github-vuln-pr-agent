@@ -1,7 +1,7 @@
 # End-to-End Plan: Simulated Recommendation Flow (react-test)
 
 ## Objective
-Validate an end-to-end non-vulnerability workflow by simulating an incoming recommendation email, applying a safe dependency change in `reyesrico/react-test`, creating a PR, sending an email notification, and then reverting the change with a second PR.
+Validate an end-to-end non-vulnerability workflow by simulating an incoming recommendation email, applying a safe dependency change in `reyesrico/react-test`, creating a PR, sending an email notification with the PR URL, and then closing the PR without merging.
 
 ## Proposed Small Library
 - Library: `is-odd`
@@ -10,8 +10,8 @@ Validate an end-to-end non-vulnerability workflow by simulating an incoming reco
 ## Scope
 - Target repository: `reyesrico/react-test`
 - Simulation input: raw email text containing `reyesrico/react-test`
-- Change 1: add `is-odd`
-- Change 2: remove `is-odd` after verification
+- Change: add `is-odd`
+- Cleanup: close PR after notification (no merge, no uninstall)
 
 ## Preconditions
 1. `gh auth login` completed and `gh auth status` succeeds.
@@ -35,42 +35,32 @@ Validate an end-to-end non-vulnerability workflow by simulating an incoming reco
 - Commit and push branch.
 - Create PR titled `chore(e2e): add is-odd (simulated recommendation)`.
 
-3. Add-phase notification verification:
+3. Notification verification (SMTP):
 - Send notification email containing PR URL and summary.
 - Verify message delivery proof:
-- SMTP mode: successful send response (message id).
-- Ethereal mode: preview URL available from Nodemailer.
+- SMTP mode: successful send response (message id) with sender/recipient `reyesrico@hotmail.com`.
+- Email body explicitly states recommendation to add `is-odd` and includes PR link.
 
-4. Remove-library phase:
-- Clone `reyesrico/react-test`.
-- Create branch `e2e/recommend-remove-is-odd-<timestamp>`.
-- Run `npm uninstall is-odd --save-exact`.
-- Run quality commands again.
-- Commit and push branch.
-- Create PR titled `chore(e2e): remove is-odd (simulated cleanup)`.
-
-5. Remove-phase notification verification:
-- Send second notification email for cleanup PR.
-- Verify delivery proof as in step 3.
+4. Close PR phase:
+- Close the created add PR without merging.
+- Confirm PR state is `closed`.
 
 ## Expected Outcomes
 1. Repository parser accepts simulated email and resolves `reyesrico/react-test`.
-2. Two PRs are created successfully:
-- Add PR for `is-odd`.
-- Remove PR for `is-odd`.
-3. Email notification is sent for both phases and evidence is captured.
-4. Logs include branch names, changed files, test command outcomes, PR URLs, and message IDs/preview URLs.
+2. One add PR is created successfully for `is-odd`.
+3. Notification email is sent with PR URL and recommendation text.
+4. PR is closed after notification.
+5. Logs include branch names, changed files, test outcomes, PR URL, and email message id.
 
 ## Failure Handling
 1. If add phase fails, stop and report root cause.
-2. If add succeeds but remove fails, keep remove task open and report recovery steps.
-3. If email send fails, mark workflow failed even if PR is created.
+2. If email send fails, mark workflow failed even if PR is created.
+3. If PR close fails, report manually closable PR link.
 
 ## Rollback
-1. If both PRs were created, close them manually if desired.
-2. If add PR merged accidentally before remove PR, merge remove PR to restore baseline.
+1. If PR is still open due to close failure, close it manually.
 
 ## Success Criteria
 - End-to-end simulation completes with all checkpoints passing.
-- Add and remove PRs exist and are linked in notifications.
+- Add PR exists, is referenced in notification email, and is then closed.
 - Email send evidence is available and auditable.

@@ -36,7 +36,7 @@ Conditional variables (only when EMAIL_ENABLED=true):
 - EMAIL_FROM
 
 Recommended starter values:
-- ALERT_REPOSITORIES=reyesrico/CovidCharts,reyesrico/workshop-app,reyesrico/react-test
+- ALERT_REPOSITORIES=reyesrico/CovidCharts,reyesrico/workshop-app,reyesrico/react-test,reyesrico/StuffieReact
 - DRY_RUN=true
 - VULN_SEVERITIES=critical,high,moderate
 - BRANCH_PREFIX=chore/security

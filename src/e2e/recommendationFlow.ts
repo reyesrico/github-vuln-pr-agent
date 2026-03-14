@@ -21,6 +21,7 @@ const schema = z.object({
     .string()
     .default("Subject: recommendation\nPlease add is-odd to reyesrico/react-test"),
   E2E_EMAIL_MODE: z.enum(["ethereal", "smtp", "off"]).default("ethereal"),
+  E2E_FLOW_MODE: z.enum(["add-only-close", "add-remove-merge"]).default("add-only-close"),
   EMAIL_TO: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
   SMTP_HOST: z.string().optional(),
@@ -212,9 +213,32 @@ async function mergePullRequest(
   });
 }
 
+async function closePullRequest(
+  token: string,
+  repoFullName: string,
+  pullNumber: number,
+  reason: string
+): Promise<void> {
+  const client = createGithubClient(token);
+  const { owner, repo } = splitRepoFullName(repoFullName);
+
+  await client.rest.pulls.update({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    state: "closed"
+  });
+
+  logInfo("PR closed", {
+    pullNumber,
+    reason
+  });
+}
+
 async function sendVerificationEmail(
   mode: "ethereal" | "smtp" | "off",
   phaseResult: PhaseResult,
+  library: string,
   env: z.infer<typeof schema>
 ): Promise<void> {
   if (mode === "off") {
@@ -225,6 +249,7 @@ async function sendVerificationEmail(
   const html = `
 <h2>E2E Recommendation Flow Update</h2>
 <p>Phase completed: <strong>${phaseResult.phase}</strong></p>
+<p>Recommendation: it is needed to add <strong>${library}</strong> to the repository.</p>
 <ul>
 <li>PR: <a href="${phaseResult.pullUrl}">${phaseResult.pullUrl}</a></li>
 <li>Branch: ${phaseResult.branchName}</li>
@@ -247,7 +272,7 @@ async function sendVerificationEmail(
     const info = await transporter.sendMail({
       to: "e2e@example.test",
       from: "agent@example.test",
-      subject: `E2E Recommendation Flow: ${phaseResult.phase} phase complete`,
+      subject: `E2E Recommendation: add ${library}`,
       html
     });
 
@@ -284,7 +309,7 @@ async function sendVerificationEmail(
   const info = await transporter.sendMail({
     to: emailTo,
     from: emailFrom,
-    subject: `E2E Recommendation Flow: ${phaseResult.phase} phase complete`,
+    subject: `E2E Recommendation: add ${library}`,
     html
   });
 
@@ -308,7 +333,8 @@ async function main(): Promise<void> {
     targetRepo: env.E2E_TARGET_REPO,
     library: env.E2E_LIBRARY,
     defaultBranch,
-    emailMode: env.E2E_EMAIL_MODE
+    emailMode: env.E2E_EMAIL_MODE,
+    flowMode: env.E2E_FLOW_MODE
   });
 
   const addResult = await runPhase(
@@ -323,7 +349,23 @@ async function main(): Promise<void> {
 
   logInfo("Add phase completed", { ...addResult });
 
-  await sendVerificationEmail(env.E2E_EMAIL_MODE, addResult, env);
+  await sendVerificationEmail(env.E2E_EMAIL_MODE, addResult, env.E2E_LIBRARY, env);
+
+  if (env.E2E_FLOW_MODE === "add-only-close") {
+    await closePullRequest(
+      env.GITHUB_TOKEN,
+      env.E2E_TARGET_REPO,
+      addResult.pullNumber,
+      "E2E cleanup after notification"
+    );
+
+    logInfo("E2E recommendation simulation completed", {
+      addPr: addResult.pullUrl,
+      closedAfterEmail: true
+    });
+    return;
+  }
+
   await mergePullRequest(env.GITHUB_TOKEN, env.E2E_TARGET_REPO, addResult.pullNumber, "add");
 
   const removeResult = await runPhase(
@@ -338,7 +380,7 @@ async function main(): Promise<void> {
 
   logInfo("Remove phase completed", { ...removeResult });
 
-  await sendVerificationEmail(env.E2E_EMAIL_MODE, removeResult, env);
+  await sendVerificationEmail(env.E2E_EMAIL_MODE, removeResult, env.E2E_LIBRARY, env);
   await mergePullRequest(env.GITHUB_TOKEN, env.E2E_TARGET_REPO, removeResult.pullNumber, "remove");
 
   logInfo("E2E recommendation simulation completed", {
