@@ -42,7 +42,7 @@ Conditional variables (only when EMAIL_ENABLED=true):
 - EMAIL_FROM
 
 Recommended starter values:
-- ACCOUNT_LOGIN=your_account
+- ACCOUNT_LOGIN=reyesrico
 - PROCESS_ONLY_EMAIL_SIGNAL=true
 - ALERT_REPOSITORIES=
 - RAW_GITHUB_EMAIL=
@@ -54,11 +54,11 @@ Recommended starter values:
 - INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true
 - EMAIL_ENABLED=true
 - EMAIL_FAIL_OPEN=true
-- EMAIL_TO=alerts@example.com
-- EMAIL_FROM=sender@example.com
-- SMTP_HOST=smtp.example.com
-- SMTP_PORT=465
-- SMTP_SECURE=true
+- EMAIL_TO=reyesrico@hotmail.com
+- EMAIL_FROM=reyesrico@hotmail.com
+- SMTP_HOST=smtp-mail.outlook.com
+- SMTP_PORT=587
+- SMTP_SECURE=false
 
 ## 3. Local Preflight Validation
 
