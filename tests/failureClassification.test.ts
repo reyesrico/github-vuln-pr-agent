@@ -17,6 +17,12 @@ describe("classifyFailure", () => {
     expect(classifyFailure("Test failed: npm run test exited 1")).toBe("test");
   });
 
+  it("classifies git push conflicts as pr failures", () => {
+    expect(
+      classifyFailure("Git push failed: [rejected] chore/security/x -> chore/security/x (fetch first)")
+    ).toBe("pr");
+  });
+
   it("classifies unknown failures", () => {
     expect(classifyFailure("Some unexpected runtime failure")).toBe("unknown");
   });

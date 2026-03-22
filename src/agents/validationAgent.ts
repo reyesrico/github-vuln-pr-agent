@@ -1,7 +1,13 @@
 import type { FixResult, TestResult, ValidationResult } from "../types.js";
 
 function hasRelevantManifestFile(changedFiles: string[]): boolean {
-  return changedFiles.some((file) => file === "package-lock.json" || file === "package.json");
+  return changedFiles.some(
+    (file) =>
+      file === "package-lock.json" ||
+      file === "package.json" ||
+      file.endsWith("/package-lock.json") ||
+      file.endsWith("/package.json")
+  );
 }
 
 export class ValidationAgent {

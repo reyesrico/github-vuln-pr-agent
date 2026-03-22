@@ -23,6 +23,14 @@ export function classifyFailure(message: string): FailureCategory {
     return "validation";
   }
 
+  if (
+    normalized.includes("git push failed") ||
+    normalized.includes("failed to push some refs") ||
+    normalized.includes("fetch first")
+  ) {
+    return "pr";
+  }
+
   if (normalized.includes("pr") || normalized.includes("pull request")) {
     return "pr";
   }
