@@ -7,6 +7,7 @@ import {
   listAccountRepositories,
   listOpenDependabotAlerts
 } from "../github/dependabot.js";
+import { readNotifiedAlertKeys, writeNotifiedAlertKeys } from "../github/notificationState.js";
 import { sendEmailNotification } from "../notify/emailNotifier.js";
 import type { AppConfig } from "../config.js";
 import type { DependabotAlert, ProcessedAlertResult } from "../types.js";
@@ -15,6 +16,11 @@ import { logError, logInfo, logWarn } from "../utils/logger.js";
 import { FixAgent } from "./fixAgent.js";
 import { TestAgent } from "./testAgent.js";
 import { ValidationAgent } from "./validationAgent.js";
+
+function buildAlertNotificationKey(result: ProcessedAlertResult): string {
+  const advisory = result.alert.cveId ?? result.alert.ghsaId;
+  return `${result.repoFullName}|${result.alert.dependencyName}|${advisory}`;
+}
 
 function createPullRequestBody(
   alerts: DependabotAlert[],
@@ -257,8 +263,39 @@ export class Orchestrator {
       return results;
     }
 
+    const runtimeRepository = process.env.GITHUB_REPOSITORY?.trim();
+    const currentAlertKeys = new Set(results.map((result) => buildAlertNotificationKey(result)));
+    const hasActionableOutcome = results.some(
+      (result) => result.status === "created" || result.status === "failed"
+    );
+
+    let shouldSendEmail = true;
+    let notifiedAlertKeys = new Set<string>();
+
+    if (runtimeRepository) {
+      notifiedAlertKeys = await readNotifiedAlertKeys(client, runtimeRepository);
+      const newAlertDetected = [...currentAlertKeys].some((key) => !notifiedAlertKeys.has(key));
+      shouldSendEmail = hasActionableOutcome || newAlertDetected;
+
+      if (!shouldSendEmail) {
+        logInfo("Skipping email notification: no new alerts and no actionable outcomes", {
+          runtimeRepository,
+          alertsProcessed: results.length
+        });
+      }
+    }
+
+    if (!shouldSendEmail) {
+      return results;
+    }
+
     try {
       await sendEmailNotification(config.email, results);
+
+      if (runtimeRepository) {
+        const mergedKeys = new Set([...notifiedAlertKeys, ...currentAlertKeys]);
+        await writeNotifiedAlertKeys(client, runtimeRepository, mergedKeys);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown email error";
       logError("Email notification failed", { message, failOpen: config.email.failOpen });
