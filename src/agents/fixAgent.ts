@@ -9,10 +9,32 @@ function sanitizeBranchSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]/g, "-");
 }
 
+function normalizeBranchName(input: string): string {
+  const normalized = input
+    .replace(/[^a-zA-Z0-9._/-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/\/+/g, "/")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^\/+|\/+$/g, "");
+
+  return normalized || "security-fix";
+}
+
 function createUniqueBranchSuffix(): string {
   const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
   const randomPart = Math.random().toString(36).slice(2, 8);
   return `${timestamp}-${randomPart}`;
+}
+
+function createPrimaryBranchName(input: FixInput): string {
+  const branch = `${input.branchPrefix}-${sanitizeBranchSegment(input.alert.dependencyName)}-${sanitizeBranchSegment(input.alert.patchedVersion ?? "patch")}-alert-${input.alert.number}-${createUniqueBranchSuffix()}`;
+  return normalizeBranchName(branch);
+}
+
+function createFlatFallbackBranchName(input: FixInput): string {
+  const flatPrefix = sanitizeBranchSegment(input.branchPrefix).replace(/[/.]+/g, "-");
+  const branch = `${flatPrefix}-${sanitizeBranchSegment(input.alert.dependencyName)}-${sanitizeBranchSegment(input.alert.patchedVersion ?? "patch")}-alert-${input.alert.number}-${createUniqueBranchSuffix()}`;
+  return normalizeBranchName(branch);
 }
 
 function parseChangedFiles(statusOutput: string): string[] {
@@ -40,6 +62,39 @@ function withLegacyPeerDeps(command: string): string {
   return `${command} --legacy-peer-deps`;
 }
 
+function includesPackageLockOnly(command: string): boolean {
+  return command.includes("--package-lock-only");
+}
+
+function appendFlag(command: string, flag: string): string {
+  if (command.includes(flag)) {
+    return command;
+  }
+
+  return `${command} ${flag}`;
+}
+
+export function isGitRefNamespaceConflict(output: string): boolean {
+  return /cannot lock ref 'refs\/heads\/.+': 'refs\/heads\/.+' exists; cannot create/i.test(output);
+}
+
+export function isNpmOverrideConflict(output: string): boolean {
+  return /\bEOVERRIDE\b|Override for .+ conflicts with direct dependency/i.test(output);
+}
+
+export function createOverrideConflictFallbackCommand(command: string): string | undefined {
+  if (!isNpmInstallCommand(command) || !includesPackageLockOnly(command)) {
+    return undefined;
+  }
+
+  const withoutLockOnly = command
+    .replace(/\s--package-lock-only\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return appendFlag(withoutLockOnly, "--save-exact");
+}
+
 export class FixAgent {
   async applyFix(input: FixInput): Promise<FixResult> {
     if (!input.alert.patchedVersion) {
@@ -64,7 +119,7 @@ export class FixAgent {
       throw new Error(`Clone failed for ${input.repoFullName}: ${cloneResult.output}`);
     }
 
-    const branchName = `${input.branchPrefix}-${sanitizeBranchSegment(input.alert.dependencyName)}-${sanitizeBranchSegment(input.alert.patchedVersion)}-alert-${input.alert.number}-${createUniqueBranchSuffix()}`;
+    let branchName = createPrimaryBranchName(input);
 
     const checkout = await runCommand(`git checkout -b ${branchName}`, repoDir);
     if (!checkout.success) {
@@ -76,6 +131,7 @@ export class FixAgent {
       : `npm install ${input.alert.dependencyName}@${input.alert.patchedVersion} --package-lock-only`;
 
     let installResult = await runCommand(installCommand, repoDir);
+    let legacyAttemptOutput: string | undefined;
     if (!installResult.success && input.strategy.retryWithLegacyPeerDeps) {
       if (canRetryWithLegacyPeerDeps(installCommand)) {
         const retryCommand = withLegacyPeerDeps(installCommand);
@@ -84,14 +140,45 @@ export class FixAgent {
         if (retryResult.success) {
           installResult = retryResult;
         } else {
-          throw new Error(
-            `Dependency update failed after retry: ${installResult.output}\nRetry (${retryCommand}) failed: ${retryResult.output}`
-          );
+          legacyAttemptOutput = retryResult.output;
+        }
+      }
+    }
+
+    if (!installResult.success && isNpmOverrideConflict(installResult.output)) {
+      const fallbackCommand = createOverrideConflictFallbackCommand(installCommand);
+      if (fallbackCommand) {
+        const fallbackResult = await runCommand(fallbackCommand, repoDir);
+
+        if (fallbackResult.success) {
+          installResult = fallbackResult;
+        } else {
+          if (input.strategy.retryWithLegacyPeerDeps && canRetryWithLegacyPeerDeps(fallbackCommand)) {
+            const retryFallbackCommand = withLegacyPeerDeps(fallbackCommand);
+            const retryFallbackResult = await runCommand(retryFallbackCommand, repoDir);
+            if (retryFallbackResult.success) {
+              installResult = retryFallbackResult;
+            } else {
+              throw new Error(
+                `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}`
+              );
+            }
+          } else {
+            throw new Error(
+              `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}`
+            );
+          }
         }
       }
     }
 
     if (!installResult.success) {
+      if (legacyAttemptOutput) {
+        throw new Error(
+          `Dependency update failed after retry: ${installResult.output}\nRetry (${withLegacyPeerDeps(installCommand)}) failed: ${legacyAttemptOutput}`
+        );
+      }
+
       throw new Error(`Dependency update failed: ${installResult.output}`);
     }
 
@@ -131,7 +218,26 @@ export class FixAgent {
     if (!input.dryRun) {
       const pushResult = await runCommand(`git push origin ${branchName}`, repoDir);
       if (!pushResult.success) {
-        throw new Error(`Git push failed: ${pushResult.output}`);
+        if (isGitRefNamespaceConflict(pushResult.output)) {
+          const fallbackBranchName = createFlatFallbackBranchName(input);
+          const renameResult = await runCommand(`git branch -m ${fallbackBranchName}`, repoDir);
+          if (!renameResult.success) {
+            throw new Error(
+              `Git push failed due to ref namespace conflict: ${pushResult.output}\nBranch rename failed: ${renameResult.output}`
+            );
+          }
+
+          const retryPushResult = await runCommand(`git push origin ${fallbackBranchName}`, repoDir);
+          if (!retryPushResult.success) {
+            throw new Error(
+              `Git push failed: ${pushResult.output}\nRetry push with fallback branch (${fallbackBranchName}) failed: ${retryPushResult.output}`
+            );
+          }
+
+          branchName = fallbackBranchName;
+        } else {
+          throw new Error(`Git push failed: ${pushResult.output}`);
+        }
       }
     }
 
