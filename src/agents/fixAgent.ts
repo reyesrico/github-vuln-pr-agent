@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -88,11 +88,34 @@ function appendFlag(command: string, flag: string): string {
   return `${command} ${flag}`;
 }
 
-function createOverrideAlignmentCommand(dependencyName: string, version: string): string {
-  const dependencyLiteral = JSON.stringify(dependencyName);
-  const versionLiteral = JSON.stringify(version);
+async function alignOverrideInPackageJson(
+  installWorkingDirectory: string,
+  dependencyName: string,
+  version: string
+): Promise<{ success: boolean; output: string }> {
+  const packageJsonPath = path.join(installWorkingDirectory, "package.json");
 
-  return `node -e "const fs=require('fs'); const p='package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.overrides=j.overrides||{}; j.overrides[${dependencyLiteral}]=${versionLiteral}; fs.writeFileSync(p, JSON.stringify(j, null, 2)+'\\n');"`;
+  try {
+    const raw = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      overrides?: Record<string, string>;
+    };
+
+    parsed.overrides = parsed.overrides ?? {};
+    parsed.overrides[dependencyName] = version;
+
+    await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    return {
+      success: true,
+      output: `Updated overrides.${dependencyName} in package.json`
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return {
+      success: false,
+      output: message
+    };
+  }
 }
 
 export function isGitRefNamespaceConflict(output: string): boolean {
@@ -153,11 +176,11 @@ export class FixAgent {
           if (retryFallbackResult.success) {
             installResult = retryFallbackResult;
           } else {
-            const alignOverrideCommand = createOverrideAlignmentCommand(
+            const alignOverrideResult = await alignOverrideInPackageJson(
+              installWorkingDirectory,
               alert.dependencyName,
               alert.patchedVersion ?? ""
             );
-            const alignOverrideResult = await runCommand(alignOverrideCommand, installWorkingDirectory);
 
             if (alignOverrideResult.success) {
               const postAlignRetry = await runCommand(retryFallbackCommand, installWorkingDirectory);
@@ -165,7 +188,7 @@ export class FixAgent {
                 installResult = postAlignRetry;
               } else {
                 throw new Error(
-                  `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment (${alignOverrideCommand}) did not recover install: ${postAlignRetry.output}`
+                  `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment did not recover install: ${postAlignRetry.output}`
                 );
               }
             } else {
