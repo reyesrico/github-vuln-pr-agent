@@ -64,13 +64,7 @@ export class FixAgent {
       throw new Error(`Clone failed for ${input.repoFullName}: ${cloneResult.output}`);
     }
 
-    const branchName = [
-      input.branchPrefix,
-      sanitizeBranchSegment(input.alert.dependencyName),
-      sanitizeBranchSegment(input.alert.patchedVersion),
-      `alert-${input.alert.number}`,
-      createUniqueBranchSuffix()
-    ].join("/");
+    const branchName = `${input.branchPrefix}-${sanitizeBranchSegment(input.alert.dependencyName)}-${sanitizeBranchSegment(input.alert.patchedVersion)}-alert-${input.alert.number}-${createUniqueBranchSuffix()}`;
 
     const checkout = await runCommand(`git checkout -b ${branchName}`, repoDir);
     if (!checkout.success) {
