@@ -82,6 +82,55 @@ npm run dev
 - `true`: targeted mode. The run only processes alerts when an advisory signal is provided (`advisory_email` or `RAW_GITHUB_EMAIL`).
 - Use `true` when you want strict event-by-event control; use `false` when you want unattended continuous remediation.
 
+### RAW_GITHUB_EMAIL Examples
+Good example (contains dependency, CVE, and repositories):
+
+```text
+[your_account] A security advisory on tar affects at least one repository
+
+node-tar Symlink Path Traversal via Drive-Relative Linkpath
+High severity
+tar
+CVE-2026-31802
+
+Affected Repositories
+your_account/repo1
+package-lock.json
+your_account/repo2
+package-lock.json
+```
+
+Insufficient example (missing advisory signal and repositories):
+
+```text
+Security update available.
+Please review your dependencies.
+```
+
+Why this matters:
+- The parser looks for CVE/GHSA IDs, dependency names, and repository names.
+- If those are missing and `PROCESS_ONLY_EMAIL_SIGNAL=true`, the run skips processing.
+
+## Running In Dev
+- Local runs use the same gate behavior as production.
+- If `PROCESS_ONLY_EMAIL_SIGNAL=true` and `RAW_GITHUB_EMAIL` is empty, local run will skip alert processing.
+- For normal local validation of end-to-end behavior, use:
+	- `PROCESS_ONLY_EMAIL_SIGNAL=false`
+	- `DRY_RUN=true`
+- For targeted local event simulation, use:
+	- `PROCESS_ONLY_EMAIL_SIGNAL=true`
+	- `RAW_GITHUB_EMAIL` populated with advisory email content
+
+Example local commands:
+
+```bash
+# Full local processing without creating PRs
+PROCESS_ONLY_EMAIL_SIGNAL=false DRY_RUN=true npm run dev
+
+# Targeted local event simulation
+PROCESS_ONLY_EMAIL_SIGNAL=true RAW_GITHUB_EMAIL="$(cat advisory-email.txt)" DRY_RUN=true npm run dev
+```
+
 ## Email Configuration
 - Set `EMAIL_TO` to the review inbox.
 - Set `EMAIL_FROM` to the sender address.
