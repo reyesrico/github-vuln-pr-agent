@@ -23,6 +23,52 @@ interface RepoEmailSummary {
   details: string[];
 }
 
+function determineSuggestedAction(summary: RepoEmailSummary): string {
+  const detailsText = summary.details.join(" ").toLowerCase();
+
+  if (summary.status === "created") {
+    if (detailsText.includes("reused dependabot pr")) {
+      return "Review and merge the listed Dependabot PR.";
+    }
+
+    if (summary.pullRequestUrl) {
+      return "Review and merge the listed PR.";
+    }
+
+    return "No action needed.";
+  }
+
+  if (summary.status === "skipped") {
+    if (detailsText.includes("no patched version provided")) {
+      return "Wait for an upstream patched release or manually review/dismiss the alert.";
+    }
+
+    if (detailsText.includes("no file changes after dependency updates")) {
+      return "Wait for alert state refresh and rerun later; if repeated, verify repo is already patched.";
+    }
+
+    if (detailsText.includes("existing pr detected")) {
+      return "Review and merge the existing PR.";
+    }
+
+    return "Review details and rerun when repository state changes.";
+  }
+
+  if (summary.failureCategory === "install") {
+    return "Set a repo-specific install command or use an existing Dependabot PR/manual update.";
+  }
+
+  if (summary.failureCategory === "pr") {
+    return "Check branch protection/permissions and rerun.";
+  }
+
+  if (summary.failureCategory === "validation" || summary.failureCategory === "test") {
+    return "Fix failing checks in the repository and rerun.";
+  }
+
+  return "Inspect details, apply repo-specific remediation, and rerun.";
+}
+
 function summarizeByRepository(results: ProcessedAlertResult[]): RepoEmailSummary[] {
   const grouped = new Map<string, ProcessedAlertResult[]>();
 
@@ -83,6 +129,7 @@ function buildHtmlReport(results: ProcessedAlertResult[]): string {
         : "N/A";
       const fixesHtml = summary.fixes.map((fix) => `- ${fix}`).join("<br>");
       const detailsHtml = summary.details.join("<br>");
+      const suggestedAction = determineSuggestedAction(summary);
 
       return `<tr>
 <td>${summary.repoFullName}</td>
@@ -92,6 +139,7 @@ function buildHtmlReport(results: ProcessedAlertResult[]): string {
 <td>${prLink}</td>
 <td><code>${mergeCommand}</code></td>
 <td>${detailsHtml}</td>
+    <td>${suggestedAction}</td>
 </tr>`;
     })
     .join("\n");
@@ -109,6 +157,7 @@ function buildHtmlReport(results: ProcessedAlertResult[]): string {
 <th>Pull Request</th>
 <th>Merge Command</th>
 <th>Details</th>
+<th>Suggested Action</th>
 </tr>
 </thead>
 <tbody>
