@@ -27,6 +27,27 @@ describe("ValidationAgent", () => {
     expect(result.reasons).toEqual([]);
   });
 
+  it("passes when nested lockfile changed and tests succeeded", () => {
+    const fix: FixResult = {
+      repoFullName: "owner/repo1",
+      branchName: "chore/security/tar/6.2.1",
+      changedFiles: ["apps/web/package-lock.json"],
+      localPath: "/tmp/repo",
+      commitMessage: "msg",
+      skipped: false
+    };
+    const test: TestResult = {
+      repoFullName: "owner/repo1",
+      branchName: "chore/security/tar/6.2.1",
+      commands: [],
+      success: true
+    };
+
+    const result = validator.validate(fix, test);
+    expect(result.valid).toBe(true);
+    expect(result.reasons).toEqual([]);
+  });
+
   it("fails when checks fail", () => {
     const fix: FixResult = {
       repoFullName: "owner/repo1",

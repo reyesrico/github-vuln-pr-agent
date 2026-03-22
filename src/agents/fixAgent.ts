@@ -9,6 +9,12 @@ function sanitizeBranchSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]/g, "-");
 }
 
+function createUniqueBranchSuffix(): string {
+  const timestamp = new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14);
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  return `${timestamp}-${randomPart}`;
+}
+
 function parseChangedFiles(statusOutput: string): string[] {
   return statusOutput
     .split("\n")
@@ -58,11 +64,7 @@ export class FixAgent {
       throw new Error(`Clone failed for ${input.repoFullName}: ${cloneResult.output}`);
     }
 
-    const branchName = [
-      input.branchPrefix,
-      sanitizeBranchSegment(input.alert.dependencyName),
-      sanitizeBranchSegment(input.alert.patchedVersion)
-    ].join("/");
+    const branchName = `${input.branchPrefix}-${sanitizeBranchSegment(input.alert.dependencyName)}-${sanitizeBranchSegment(input.alert.patchedVersion)}-alert-${input.alert.number}-${createUniqueBranchSuffix()}`;
 
     const checkout = await runCommand(`git checkout -b ${branchName}`, repoDir);
     if (!checkout.success) {
