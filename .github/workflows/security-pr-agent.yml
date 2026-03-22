@@ -1,11 +1,14 @@
 name: Security PR Agent
 
 on:
+  repository_dispatch:
+    types:
+      - advisory-email-received
   workflow_dispatch:
     inputs:
       advisory_email:
-        description: "Optional raw GitHub advisory email text. When provided, only matching new advisory alerts are processed."
-        required: false
+        description: "Raw GitHub advisory email text to process. Required in alert-driven mode."
+        required: true
         type: string
       account_login:
         description: "Optional account/org login to scope auto-discovered repositories."
@@ -15,11 +18,6 @@ on:
         description: "Optional comma-separated repository list (owner/repo)."
         required: false
         type: string
-      process_only_email_signal:
-        description: "When true, process only alerts matching advisory_email/RAW_GITHUB_EMAIL; when false, process open alerts automatically."
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   run-agent:
@@ -42,13 +40,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate advisory signal payload
+        env:
+          RAW_GITHUB_EMAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.advisory_email || github.event.client_payload.advisory_email || '' }}
+        run: |
+          if [[ -z "${RAW_GITHUB_EMAIL// }" ]]; then
+            echo "Missing advisory payload. This workflow runs only when a new alert payload is received."
+            exit 1
+          fi
+
       - name: Run vulnerability PR agent
         env:
           GITHUB_TOKEN: ${{ secrets.SECURITY_AGENT_GITHUB_TOKEN }}
           ACCOUNT_LOGIN: ${{ inputs.account_login || vars.ACCOUNT_LOGIN }}
           ALERT_REPOSITORIES: ${{ inputs.alert_repositories || vars.ALERT_REPOSITORIES }}
-          RAW_GITHUB_EMAIL: ${{ inputs.advisory_email || vars.RAW_GITHUB_EMAIL }}
-          PROCESS_ONLY_EMAIL_SIGNAL: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.process_only_email_signal) || vars.PROCESS_ONLY_EMAIL_SIGNAL }}
+          RAW_GITHUB_EMAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.advisory_email || github.event.client_payload.advisory_email || '' }}
+          PROCESS_ONLY_EMAIL_SIGNAL: true
           DRY_RUN: ${{ vars.DRY_RUN }}
           VULN_SEVERITIES: ${{ vars.VULN_SEVERITIES }}
           BRANCH_PREFIX: ${{ vars.BRANCH_PREFIX }}
