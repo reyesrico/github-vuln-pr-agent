@@ -118,6 +118,34 @@ async function alignOverrideInPackageJson(
   }
 }
 
+async function getInstallVersionSpec(
+  installWorkingDirectory: string,
+  dependencyName: string,
+  patchedVersion?: string
+): Promise<string> {
+  if (!patchedVersion) {
+    return "latest";
+  }
+
+  const packageJsonPath = path.join(installWorkingDirectory, "package.json");
+
+  try {
+    const raw = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      overrides?: Record<string, string | Record<string, string>>;
+    };
+
+    const overrideValue = parsed.overrides?.[dependencyName];
+    if (typeof overrideValue === "string" && overrideValue.includes(patchedVersion)) {
+      return overrideValue;
+    }
+  } catch {
+    // Fall back to patched version when package.json cannot be read or parsed.
+  }
+
+  return patchedVersion;
+}
+
 export function isGitRefNamespaceConflict(output: string): boolean {
   return /cannot lock ref 'refs\/heads\/.+': 'refs\/heads\/.+' exists; cannot create/i.test(output);
 }
@@ -216,12 +244,22 @@ export class FixAgent {
     }
   }
 
-  private buildInstallCommand(commands: RepoCommands, alert: DependabotAlert): string {
+  private async buildInstallCommand(
+    commands: RepoCommands,
+    alert: DependabotAlert,
+    installWorkingDirectory: string
+  ): Promise<string> {
     if (commands.install) {
       return commands.install;
     }
 
-    return `npm install ${alert.dependencyName}@${alert.patchedVersion} --package-lock-only`;
+    const versionSpec = await getInstallVersionSpec(
+      installWorkingDirectory,
+      alert.dependencyName,
+      alert.patchedVersion
+    );
+
+    return `npm install ${alert.dependencyName}@${versionSpec} --package-lock-only`;
   }
 
   async applyFixBatch(input: BatchFixInput): Promise<FixResult> {
@@ -255,7 +293,11 @@ export class FixAgent {
 
     for (const alert of input.alerts) {
       const installWorkingDirectory = resolveInstallWorkingDirectory(repoDir, alert.manifestPath);
-      const installCommand = this.buildInstallCommand(input.commands, alert);
+      const installCommand = await this.buildInstallCommand(
+        input.commands,
+        alert,
+        installWorkingDirectory
+      );
       await this.applyInstallCommandWithFallbacks(
         installCommand,
         installWorkingDirectory,

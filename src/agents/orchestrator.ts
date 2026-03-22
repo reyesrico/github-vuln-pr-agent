@@ -1,6 +1,7 @@
 import { createGithubClient } from "../github/client.js";
 import {
   createSecurityPullRequest,
+  findReusableDependabotPullRequest,
   findOpenPullRequestByHead,
   getDefaultBranch,
   listAccountRepositories,
@@ -113,6 +114,27 @@ export class Orchestrator {
 
       if (actionableAlerts.length === 0) {
         continue;
+      }
+
+      if (!config.dryRun) {
+        const reusableDependabotPr = await findReusableDependabotPullRequest(
+          client,
+          repoFullName,
+          actionableAlerts
+        );
+
+        if (reusableDependabotPr) {
+          for (const alert of actionableAlerts) {
+            results.push({
+              repoFullName,
+              alert,
+              status: "created",
+              details: `Reused Dependabot PR: ${reusableDependabotPr.pullUrl}`,
+              pullRequest: reusableDependabotPr
+            });
+          }
+          continue;
+        }
       }
 
       const defaultBranch = await getDefaultBranch(client, repoFullName);

@@ -156,6 +156,58 @@ export async function createSecurityPullRequest(
   };
 }
 
+export async function findReusableDependabotPullRequest(
+  client: Octokit,
+  repoFullName: string,
+  alerts: DependabotAlert[]
+): Promise<PullRequestResult | undefined> {
+  const { owner, repo } = splitRepoFullName(repoFullName);
+  const dependencies = [...new Set(alerts.map((alert) => alert.dependencyName.toLowerCase()))];
+
+  if (dependencies.length === 0) {
+    return undefined;
+  }
+
+  const response = await client.rest.pulls.list({
+    owner,
+    repo,
+    state: "open",
+    per_page: 100
+  });
+
+  const candidates = response.data.filter((pr) =>
+    pr.head.ref.toLowerCase().startsWith("dependabot/")
+  );
+
+  const strictMatch = candidates.find((pr) => {
+    const title = pr.title.toLowerCase();
+    const headRef = pr.head.ref.toLowerCase();
+    return dependencies.every((dependency) => title.includes(dependency) || headRef.includes(dependency));
+  });
+
+  const relaxedMatch =
+    dependencies.length === 1
+      ? candidates.find((pr) => {
+          const dependency = dependencies[0] ?? "";
+          const title = pr.title.toLowerCase();
+          const headRef = pr.head.ref.toLowerCase();
+          return title.includes(dependency) || headRef.includes(dependency);
+        })
+      : undefined;
+
+  const match = strictMatch ?? relaxedMatch;
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    repoFullName,
+    pullNumber: match.number,
+    pullUrl: match.html_url,
+    title: match.title
+  };
+}
+
 export async function getDefaultBranch(
   client: Octokit,
   repoFullName: string
