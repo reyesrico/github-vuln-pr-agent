@@ -2,14 +2,14 @@
 
 ## Runtime
 - Node.js + TypeScript service.
-- Runs locally or in GitHub Actions (hourly schedule + manual dispatch).
+- Runs locally or in GitHub Actions via alert-driven dispatch only.
 
 ## Inputs
 - GitHub token (`GITHUB_TOKEN`).
 - Repository scope via one of:
 	- `ALERT_REPOSITORIES` explicit list.
 	- Auto-discovery (`ACCOUNT_LOGIN` with empty `ALERT_REPOSITORIES`).
-	- Advisory email signal (`RAW_GITHUB_EMAIL` or `workflow_dispatch` input `advisory_email`).
+	- Advisory email signal (`RAW_GITHUB_EMAIL`, `workflow_dispatch` input `advisory_email`, or `repository_dispatch` payload).
 - Event gate: `PROCESS_ONLY_EMAIL_SIGNAL`.
 - Optional per-repo command overrides (`REPO_COMMANDS`).
 
@@ -27,15 +27,15 @@
 - Limits alerts processed per repo.
 - Skips alerts without available patched version.
 - Uses temporary clone directory.
-- `PROCESS_ONLY_EMAIL_SIGNAL=false` enables fully automated schedule-based processing.
-- `PROCESS_ONLY_EMAIL_SIGNAL=true` is optional for targeted advisory-signal-only runs.
+- Workflow enforces alert-driven signal processing (`PROCESS_ONLY_EMAIL_SIGNAL=true`).
+- Repeated non-actionable runs do not send emails when no new alerts are detected.
 
 ## Operational Model
-1. Trigger via schedule or manual dispatch.
+1. Trigger via `workflow_dispatch` or `repository_dispatch` with advisory payload.
 2. Resolve target repositories from explicit list, advisory email, or account auto-discovery.
-3. If event-gated and no advisory signal: skip processing.
+3. If advisory signal is missing: fail fast and stop processing.
 4. Fetch open Dependabot alerts and filter by severity + advisory signal.
-5. For each matching alert: Fix -> Test -> Validate -> PR.
+5. For each repository: reuse matching open Dependabot PR when possible, otherwise run batched local fix flow (one PR per repo).
 6. Send summary email with created/skipped/failed status and merge-ready PR links.
 
 ## Flow Diagram
@@ -57,10 +57,10 @@ flowchart TD
 ```
 
 ### Flow Notes
-1. With `PROCESS_ONLY_EMAIL_SIGNAL=false`, scheduled runs process matching open alerts automatically.
-2. With `PROCESS_ONLY_EMAIL_SIGNAL=true`, the flow starts only when a fresh advisory signal is present.
-3. "Ready to Review and Merge" means the PR passed fix, test, and validation stages.
-4. Email includes created PR links plus skipped/failed details for visibility.
+1. Flow starts only when a fresh advisory signal payload is present.
+2. "Ready to Review and Merge" means the PR passed orchestration checks or a reusable Dependabot PR was found.
+3. Email includes created PR links plus skipped/failed details and suggested actions.
+4. Repeated non-actionable skip-only runs are suppressed from email notifications.
 
 ## Sequence Diagram
 ```mermaid
@@ -97,12 +97,10 @@ sequenceDiagram
 ## Gate Diagram
 ```mermaid
 flowchart LR
-	A[Workflow Triggered] --> B{PROCESS_ONLY_EMAIL_SIGNAL=true?}
-	B -- No --> C[Process configured scope automatically]
-	B -- Yes --> D{Fresh advisory email signal present?}
-	D -- No --> E[Skip run to avoid backlog churn]
-	D -- Yes --> F[Filter alerts by CVE/GHSA/dependency]
-	F --> C
+	A[Workflow Triggered] --> B{Advisory payload present?}
+	B -- No --> E[Fail fast and stop]
+	B -- Yes --> F[Filter alerts by CVE/GHSA/dependency]
+	F --> C[Process configured scope]
 	C --> G[Fix + Test + Validate]
 	G --> H{PR ready?}
 	H -- Yes --> I[Include merge-ready PR link in email]
@@ -114,6 +112,5 @@ flowchart LR
 - `advisory_email`
 - `account_login`
 - `alert_repositories`
-- `process_only_email_signal`
 
 Inputs override stored repository variables for that run, enabling one-off processing of a newly received advisory email without editing persistent settings.

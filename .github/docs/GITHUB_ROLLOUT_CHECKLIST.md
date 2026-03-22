@@ -43,7 +43,7 @@ Conditional variables (only when EMAIL_ENABLED=true):
 
 Recommended starter values:
 - ACCOUNT_LOGIN=your_account
-- PROCESS_ONLY_EMAIL_SIGNAL=false
+- PROCESS_ONLY_EMAIL_SIGNAL=true
 - ALERT_REPOSITORIES=
 - RAW_GITHUB_EMAIL=
 - DRY_RUN=true
@@ -75,8 +75,8 @@ Expected behavior:
 
 - Keep DRY_RUN=true.
 - Trigger workflow manually from Actions -> Security PR Agent -> Run workflow.
-- For event-driven validation, pass `advisory_email` input in workflow dispatch.
-- Validate logs show `emailSignalActive: true` and only matching alerts are processed.
+- Pass `advisory_email` input in workflow dispatch (required).
+- Validate logs show only advisory-matching alerts are processed.
 
 ## 5. Verify Outputs
 
@@ -110,6 +110,7 @@ Add these optional variables for `.github/workflows/e2e-recommendation.yml`:
 Reuse SMTP and EMAIL variables/secrets from the main workflow.
 
 ## 9. Recommended Production Pattern
-1. Keep `PROCESS_ONLY_EMAIL_SIGNAL=false` for fully automated scheduled processing.
-2. Optionally use `advisory_email` input for targeted one-off runs when needed.
+1. Keep workflow alert-driven (no schedule trigger).
+2. Dispatch with `advisory_email` only when a new alert payload arrives.
 3. Review resulting PR links from notification email.
+4. Non-actionable repeated skips are suppressed from email when there are no new alerts and no actionable outcomes.

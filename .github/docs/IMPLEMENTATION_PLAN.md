@@ -4,14 +4,14 @@
 Automate the flow from open Dependabot alerts (and optional advisory signal targeting) to ready-to-review pull requests with email notification.
 
 ## Scope
-- Run fully automatically on schedule without manual advisory input.
-- Optionally ingest advisory signal from raw GitHub advisory email text for targeted runs.
+- Run only when an advisory payload is received (manual dispatch with payload or repository_dispatch event).
+- Ingest advisory signal from raw GitHub advisory email text.
 - Resolve repository scope automatically (explicit list or account auto-discovery).
 - Filter open Dependabot alerts by severity, and optionally by advisory signal.
-- For each actionable alert, attempt a dependency patch upgrade in a branch.
+- For each repository, reuse existing Dependabot PR when possible; otherwise attempt batched dependency patch upgrades in one branch.
 - Run repository tests/lint commands.
-- Validate generated changes and create PR.
-- Send email summary with PR links and merge command for review-ready items.
+- Validate generated changes and create one PR per repo.
+- Send email summary with PR links and merge command for review-ready items, including suggested action guidance.
 
 ## Multi-Agent Design
 1. Fix Agent
@@ -30,7 +30,7 @@ Automate the flow from open Dependabot alerts (and optional advisory signal targ
 4. Orchestrator Agent
 - Fetches alerts.
 - Applies advisory signal filtering and processing gate.
-- Calls Fix -> Test -> Validation sequence.
+- Prefers Dependabot PR reuse, then calls Fix -> Test -> Validation fallback sequence.
 - Opens PR and dispatches notification.
 
 ## Delivery Phases
@@ -39,15 +39,16 @@ Automate the flow from open Dependabot alerts (and optional advisory signal targ
 3. Agent pipeline implementation (Fix -> Test -> Validation -> PR).
 4. Email notification implementation.
 5. Event-gated execution mode (`PROCESS_ONLY_EMAIL_SIGNAL`).
-6. Fully automated execution mode (`PROCESS_ONLY_EMAIL_SIGNAL=false`).
-7. CI workflow dispatch automation with advisory input overrides.
-8. Operational runbook and rollout docs.
+6. One-PR-per-repository batching mode.
+7. Dependabot PR reuse fallback strategy.
+8. CI alert-dispatch automation with advisory payload requirement.
+9. Operational runbook and rollout docs.
 
 ## Definition of Done
 - `npm run check` passes.
-- Workflow can run on schedule and manual dispatch.
-- Workflow dispatch accepts advisory email input for one-off event runs.
-- Agent runs fully automated on schedule when `PROCESS_ONLY_EMAIL_SIGNAL=false`.
-- Agent skips backlog processing when no new advisory signal is present and gate is enabled.
+- Workflow runs only with advisory payload (workflow_dispatch/repository_dispatch).
+- Workflow dispatch requires advisory email input.
+- Agent sends email only when there are actionable outcomes or newly seen alerts.
+- Agent suppresses repeated non-actionable skip-only notification noise.
 - Email notification includes PR URL and immediate merge command.
 - Templates/documentation contain placeholders only (no personal identifiers).

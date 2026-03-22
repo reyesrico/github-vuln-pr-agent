@@ -4,7 +4,7 @@
 - Repository: https://github.com/your_account/github-vuln-pr-agent
 - Local path: /path/to/github-vuln-pr-agent
 - Branch: main
-- Latest known commit message: feat: process only new advisory email alerts with auto repo discovery
+- Latest known commit message: feat: enforce alert-driven workflow execution
 
 ## Objective
 Automate remediation from newly received GitHub advisory signals to tested, validated, review-ready PR creation, then notify by email.
@@ -64,9 +64,11 @@ Automate remediation from newly received GitHub advisory signals to tested, vali
 - Findings documented in `.github/docs/E2E_EXECUTION_FINDINGS.md`.
 13. Event-driven production mode:
 - Added advisory signal parsing from raw GitHub advisory email.
-- Added optional `PROCESS_ONLY_EMAIL_SIGNAL=true` gate for targeted advisory-only processing.
-- Set fully automated default mode with `PROCESS_ONLY_EMAIL_SIGNAL=false`.
-- Added workflow_dispatch automation inputs (`advisory_email`, `account_login`, `alert_repositories`, `process_only_email_signal`).
+- Added `PROCESS_ONLY_EMAIL_SIGNAL=true` gate for advisory-only processing.
+- Enforced alert-driven workflow execution with advisory payload requirement.
+- Removed scheduled workflow trigger to stop frequency-based execution.
+- Added repository_dispatch event support (`advisory-email-received`).
+- Added notification suppression for repeated non-actionable skip-only runs.
 - Updated production rollout/docs to use placeholders only.
 
 ## Testing Status
@@ -82,14 +84,14 @@ Test suite status:
 
 ## Configuration Pending (GitHub side)
 - Keep `DRY_RUN=true` during validation.
-- Scheduled runs work automatically with `PROCESS_ONLY_EMAIL_SIGNAL=false`.
-- Optional targeted dispatch uses `advisory_email` with `PROCESS_ONLY_EMAIL_SIGNAL=true`.
+- Workflow runs only when advisory payload is provided.
+- Recommended dispatch path is advisory-driven (`workflow_dispatch` with `advisory_email` or `repository_dispatch` payload).
 - Switch to `DRY_RUN=false` only after successful dry-run validation.
 
 ## Recommended Next Steps
 1. Tune `REPO_COMMANDS` per repository to improve validation pass rate.
-2. Keep fully automated mode enabled for scheduled processing.
-3. Use event gate only for targeted one-off advisory runs.
+2. Keep alert-driven mode enabled to avoid non-actionable frequency noise.
+3. Use advisory payload dispatch for one-off targeted runs.
 4. Move to live mode (`DRY_RUN=false`) after dry-run confidence is achieved.
 5. Optionally enable branch protections and auto-merge policies.
 

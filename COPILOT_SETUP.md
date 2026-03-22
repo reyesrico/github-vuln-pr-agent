@@ -27,7 +27,7 @@ Set these under **Settings → Secrets and variables → Actions → Variables (
 | Variable | Value |
 |---|---|
 | `ACCOUNT_LOGIN` | `your_account` |
-| `PROCESS_ONLY_EMAIL_SIGNAL` | `false` |
+| `PROCESS_ONLY_EMAIL_SIGNAL` | `true` |
 | `DRY_RUN` | `true` (set to `false` when ready for live PR creation) |
 | `VULN_SEVERITIES` | `critical,high,moderate` |
 | `BRANCH_PREFIX` | `chore/security` |
@@ -83,7 +83,7 @@ BRANCH_PREFIX=chore/security
 MAX_ALERTS_PER_REPO=3
 INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true
 REPO_COMMANDS={}
-PROCESS_ONLY_EMAIL_SIGNAL=false
+PROCESS_ONLY_EMAIL_SIGNAL=true
 ```
 
 ---
@@ -117,21 +117,28 @@ To switch from dry-run to live mode:
 ## 6. Trigger the Workflow Manually
 
 ```bash
-gh workflow run security-pr-agent.yml --repo owner/repo
-```
-
-Event-driven dispatch with an advisory email:
-
-```bash
 gh workflow run security-pr-agent.yml \
   --repo owner/repo \
-  -f advisory_email="$(cat advisory-email.txt)" \
-  -f process_only_email_signal=false
+  -f advisory_email="$(cat advisory-email.txt)"
 ```
+
+Event-driven dispatch with an advisory email payload:
+
+```bash
+gh api repos/owner/repo/dispatches \
+  -f event_type='advisory-email-received' \
+  -f client_payload='{"advisory_email":"<raw advisory body>"}'
+```
+
+## 7. Runtime Trigger Policy
+
+- The workflow does not run on a schedule.
+- The workflow requires advisory payload input to execute.
+- Repeated non-actionable runs are not emailed when no new alerts are detected and no actionable outcomes exist.
 
 ---
 
-## 7. SMTP Notes
+## 8. SMTP Notes
 
 - Use your provider's SMTP host/port/secure settings.
 - Use an app password when your provider requires it.
@@ -139,7 +146,7 @@ gh workflow run security-pr-agent.yml \
 
 ---
 
-## 8. Copilot Instructions
+## 9. Copilot Instructions
 
 If GitHub Copilot is asked to fix or extend this project, the following context applies:
 
