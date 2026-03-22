@@ -39,6 +39,16 @@ export interface FixInput {
   strategy: FixStrategy;
 }
 
+export interface BatchFixInput {
+  repoFullName: string;
+  alerts: DependabotAlert[];
+  branchPrefix: string;
+  githubToken: string;
+  dryRun: boolean;
+  commands: RepoCommands;
+  strategy: FixStrategy;
+}
+
 export interface FixResult {
   repoFullName: string;
   branchName: string;

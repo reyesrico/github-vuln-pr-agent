@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { runCommand } from "../utils/exec.js";
-import type { FixInput, FixResult } from "../types.js";
+import type { BatchFixInput, DependabotAlert, FixInput, FixResult, RepoCommands, FixStrategy } from "../types.js";
 
 function sanitizeBranchSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]/g, "-");
@@ -26,14 +26,16 @@ function createUniqueBranchSuffix(): string {
   return `${timestamp}-${randomPart}`;
 }
 
-function createPrimaryBranchName(input: FixInput): string {
-  const branch = `${input.branchPrefix}-${sanitizeBranchSegment(input.alert.dependencyName)}-${sanitizeBranchSegment(input.alert.patchedVersion ?? "patch")}-alert-${input.alert.number}-${createUniqueBranchSuffix()}`;
+function createBatchBranchName(repoFullName: string, branchPrefix: string): string {
+  const repoSegment = sanitizeBranchSegment(repoFullName.replace("/", "-"));
+  const branch = `${branchPrefix}/${repoSegment}/batch-${createUniqueBranchSuffix()}`;
   return normalizeBranchName(branch);
 }
 
-function createFlatFallbackBranchName(input: FixInput): string {
-  const flatPrefix = sanitizeBranchSegment(input.branchPrefix).replace(/[/.]+/g, "-");
-  const branch = `${flatPrefix}-${sanitizeBranchSegment(input.alert.dependencyName)}-${sanitizeBranchSegment(input.alert.patchedVersion ?? "patch")}-alert-${input.alert.number}-${createUniqueBranchSuffix()}`;
+function createFlatFallbackBatchBranchName(repoFullName: string, branchPrefix: string): string {
+  const flatPrefix = sanitizeBranchSegment(branchPrefix).replace(/[/.]+/g, "-");
+  const repoSegment = sanitizeBranchSegment(repoFullName.replace("/", "-"));
+  const branch = `${flatPrefix}-${repoSegment}-batch-${createUniqueBranchSuffix()}`;
   return normalizeBranchName(branch);
 }
 
@@ -115,48 +117,16 @@ export function createOverrideConflictFallbackCommand(command: string): string |
 }
 
 export class FixAgent {
-  async applyFix(input: FixInput): Promise<FixResult> {
-    if (!input.alert.patchedVersion) {
-      return {
-        repoFullName: input.repoFullName,
-        branchName: "",
-        changedFiles: [],
-        localPath: "",
-        commitMessage: "",
-        skipped: true,
-        reason: "No patched version provided by Dependabot alert"
-      };
-    }
-
-    const tmpBase = await mkdtemp(path.join(os.tmpdir(), "vuln-pr-agent-"));
-    const repoDir = path.join(tmpBase, input.repoFullName.replace("/", "__"));
-    const encodedToken = encodeURIComponent(input.githubToken);
-    const cloneUrl = `https://x-access-token:${encodedToken}@github.com/${input.repoFullName}.git`;
-
-    const cloneResult = await runCommand(`git clone --depth 1 ${cloneUrl} ${repoDir}`, tmpBase);
-    if (!cloneResult.success) {
-      throw new Error(`Clone failed for ${input.repoFullName}: ${cloneResult.output}`);
-    }
-
-    let branchName = createPrimaryBranchName(input);
-
-    const checkout = await runCommand(`git checkout -b ${branchName}`, repoDir);
-    if (!checkout.success) {
-      throw new Error(`Branch creation failed: ${checkout.output}`);
-    }
-
-    const installWorkingDirectory = resolveInstallWorkingDirectory(
-      repoDir,
-      input.alert.manifestPath
-    );
-
-    const installCommand = input.commands.install
-      ? input.commands.install
-      : `npm install ${input.alert.dependencyName}@${input.alert.patchedVersion} --package-lock-only`;
-
+  private async applyInstallCommandWithFallbacks(
+    installCommand: string,
+    installWorkingDirectory: string,
+    alert: DependabotAlert,
+    strategy: FixStrategy
+  ): Promise<void> {
     let installResult = await runCommand(installCommand, installWorkingDirectory);
     let legacyAttemptOutput: string | undefined;
-    if (!installResult.success && input.strategy.retryWithLegacyPeerDeps) {
+
+    if (!installResult.success && strategy.retryWithLegacyPeerDeps) {
       if (canRetryWithLegacyPeerDeps(installCommand)) {
         const retryCommand = withLegacyPeerDeps(installCommand);
         const retryResult = await runCommand(retryCommand, installWorkingDirectory);
@@ -176,45 +146,38 @@ export class FixAgent {
 
         if (fallbackResult.success) {
           installResult = fallbackResult;
-        } else {
-          if (input.strategy.retryWithLegacyPeerDeps && canRetryWithLegacyPeerDeps(fallbackCommand)) {
-            const retryFallbackCommand = withLegacyPeerDeps(fallbackCommand);
-            const retryFallbackResult = await runCommand(
-              retryFallbackCommand,
-              installWorkingDirectory
-            );
-            if (retryFallbackResult.success) {
-              installResult = retryFallbackResult;
-            } else {
-              const alignOverrideCommand = createOverrideAlignmentCommand(
-                input.alert.dependencyName,
-                input.alert.patchedVersion
-              );
-              const alignOverrideResult = await runCommand(
-                alignOverrideCommand,
-                installWorkingDirectory
-              );
+        } else if (strategy.retryWithLegacyPeerDeps && canRetryWithLegacyPeerDeps(fallbackCommand)) {
+          const retryFallbackCommand = withLegacyPeerDeps(fallbackCommand);
+          const retryFallbackResult = await runCommand(retryFallbackCommand, installWorkingDirectory);
 
-              if (alignOverrideResult.success) {
-                const postAlignRetry = await runCommand(retryFallbackCommand, installWorkingDirectory);
-                if (postAlignRetry.success) {
-                  installResult = postAlignRetry;
-                } else {
-                  throw new Error(
-                    `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment (${alignOverrideCommand}) did not recover install: ${postAlignRetry.output}`
-                  );
-                }
+          if (retryFallbackResult.success) {
+            installResult = retryFallbackResult;
+          } else {
+            const alignOverrideCommand = createOverrideAlignmentCommand(
+              alert.dependencyName,
+              alert.patchedVersion ?? ""
+            );
+            const alignOverrideResult = await runCommand(alignOverrideCommand, installWorkingDirectory);
+
+            if (alignOverrideResult.success) {
+              const postAlignRetry = await runCommand(retryFallbackCommand, installWorkingDirectory);
+              if (postAlignRetry.success) {
+                installResult = postAlignRetry;
               } else {
                 throw new Error(
-                  `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment failed: ${alignOverrideResult.output}`
+                  `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment (${alignOverrideCommand}) did not recover install: ${postAlignRetry.output}`
                 );
               }
+            } else {
+              throw new Error(
+                `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment failed: ${alignOverrideResult.output}`
+              );
             }
-          } else {
-            throw new Error(
-              `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}`
-            );
           }
+        } else {
+          throw new Error(
+            `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}`
+          );
         }
       }
     }
@@ -228,6 +191,55 @@ export class FixAgent {
 
       throw new Error(`Dependency update failed: ${installResult.output}`);
     }
+  }
+
+  private buildInstallCommand(commands: RepoCommands, alert: DependabotAlert): string {
+    if (commands.install) {
+      return commands.install;
+    }
+
+    return `npm install ${alert.dependencyName}@${alert.patchedVersion} --package-lock-only`;
+  }
+
+  async applyFixBatch(input: BatchFixInput): Promise<FixResult> {
+    if (input.alerts.length === 0) {
+      return {
+        repoFullName: input.repoFullName,
+        branchName: "",
+        changedFiles: [],
+        localPath: "",
+        commitMessage: "",
+        skipped: true,
+        reason: "No alerts provided for batch fix"
+      };
+    }
+
+    const tmpBase = await mkdtemp(path.join(os.tmpdir(), "vuln-pr-agent-"));
+    const repoDir = path.join(tmpBase, input.repoFullName.replace("/", "__"));
+    const encodedToken = encodeURIComponent(input.githubToken);
+    const cloneUrl = `https://x-access-token:${encodedToken}@github.com/${input.repoFullName}.git`;
+
+    const cloneResult = await runCommand(`git clone --depth 1 ${cloneUrl} ${repoDir}`, tmpBase);
+    if (!cloneResult.success) {
+      throw new Error(`Clone failed for ${input.repoFullName}: ${cloneResult.output}`);
+    }
+
+    let branchName = createBatchBranchName(input.repoFullName, input.branchPrefix);
+    const checkout = await runCommand(`git checkout -b ${branchName}`, repoDir);
+    if (!checkout.success) {
+      throw new Error(`Branch creation failed: ${checkout.output}`);
+    }
+
+    for (const alert of input.alerts) {
+      const installWorkingDirectory = resolveInstallWorkingDirectory(repoDir, alert.manifestPath);
+      const installCommand = this.buildInstallCommand(input.commands, alert);
+      await this.applyInstallCommandWithFallbacks(
+        installCommand,
+        installWorkingDirectory,
+        alert,
+        input.strategy
+      );
+    }
 
     const status = await runCommand("git status --porcelain", repoDir);
     if (!status.success) {
@@ -240,14 +252,15 @@ export class FixAgent {
         repoFullName: input.repoFullName,
         branchName,
         changedFiles,
-        localPath: installWorkingDirectory,
+        localPath: repoDir,
         commitMessage: "",
         skipped: true,
-        reason: "No file changes after dependency update"
+        reason: "No file changes after dependency updates"
       };
     }
 
-    const commitMessage = `fix(security): bump ${input.alert.dependencyName} to ${input.alert.patchedVersion}`;
+    const dependencyList = input.alerts.map((alert) => alert.dependencyName).join(", ");
+    const commitMessage = `fix(security): apply ${input.alerts.length} dependency updates (${dependencyList})`;
 
     const addResult = await runCommand("git add -A", repoDir);
     if (!addResult.success) {
@@ -266,7 +279,10 @@ export class FixAgent {
       const pushResult = await runCommand(`git push origin ${branchName}`, repoDir);
       if (!pushResult.success) {
         if (isGitRefNamespaceConflict(pushResult.output)) {
-          const fallbackBranchName = createFlatFallbackBranchName(input);
+          const fallbackBranchName = createFlatFallbackBatchBranchName(
+            input.repoFullName,
+            input.branchPrefix
+          );
           const renameResult = await runCommand(`git branch -m ${fallbackBranchName}`, repoDir);
           if (!renameResult.success) {
             throw new Error(
@@ -292,9 +308,42 @@ export class FixAgent {
       repoFullName: input.repoFullName,
       branchName,
       changedFiles,
-      localPath: installWorkingDirectory,
+      localPath: repoDir,
       commitMessage,
       skipped: false
     };
+  }
+
+  async applyFix(input: FixInput): Promise<FixResult> {
+    if (!input.alert.patchedVersion) {
+      return {
+        repoFullName: input.repoFullName,
+        branchName: "",
+        changedFiles: [],
+        localPath: "",
+        commitMessage: "",
+        skipped: true,
+        reason: "No patched version provided by Dependabot alert"
+      };
+    }
+
+    const batchResult = await this.applyFixBatch({
+      repoFullName: input.repoFullName,
+      alerts: [input.alert],
+      branchPrefix: input.branchPrefix,
+      githubToken: input.githubToken,
+      dryRun: input.dryRun,
+      commands: input.commands,
+      strategy: input.strategy
+    });
+
+    if (!batchResult.skipped && input.alert.patchedVersion) {
+      return {
+        ...batchResult,
+        commitMessage: `fix(security): bump ${input.alert.dependencyName} to ${input.alert.patchedVersion}`
+      };
+    }
+
+    return batchResult;
   }
 }

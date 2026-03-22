@@ -8,7 +8,7 @@ import {
 } from "../github/dependabot.js";
 import { sendEmailNotification } from "../notify/emailNotifier.js";
 import type { AppConfig } from "../config.js";
-import type { ProcessedAlertResult } from "../types.js";
+import type { DependabotAlert, ProcessedAlertResult } from "../types.js";
 import { classifyFailure } from "../utils/failureClassification.js";
 import { logError, logInfo, logWarn } from "../utils/logger.js";
 import { FixAgent } from "./fixAgent.js";
@@ -16,21 +16,28 @@ import { TestAgent } from "./testAgent.js";
 import { ValidationAgent } from "./validationAgent.js";
 
 function createPullRequestBody(
-  alertSummary: string,
-  advisory: string,
-  dependencyName: string,
-  version: string,
-  alertUrl: string,
+  alerts: DependabotAlert[],
   prUrlPlaceholder: string
 ): string {
+  const bulletList = alerts
+    .map((alert) => {
+      const advisory = alert.cveId ?? alert.ghsaId;
+      return `- ${alert.dependencyName} -> ${alert.patchedVersion ?? "unknown"} (${advisory})`;
+    })
+    .join("\n");
+
+  const alertLinks = alerts.map((alert) => `- ${alert.htmlUrl}`).join("\n");
+
   return [
-    "## Automated Security Fix",
+    "## Automated Security Fixes",
     "",
-    `- Dependency: ${dependencyName}`,
-    `- Upgraded to: ${version}`,
-    `- Advisory: ${advisory}`,
-    `- Summary: ${alertSummary}`,
-    `- Dependabot Alert: ${alertUrl}`,
+    `- Alerts in this PR: ${alerts.length}`,
+    "",
+    "### Updated Dependencies",
+    bulletList,
+    "",
+    "### Dependabot Alerts",
+    alertLinks,
     "",
     "## Validation",
     "- Lint command executed",
@@ -84,46 +91,66 @@ export class Orchestrator {
         continue;
       }
 
-      const defaultBranch = await getDefaultBranch(client, repoFullName);
-
       for (const alert of alerts) {
         logInfo("Handling alert", {
           repoFullName,
           dependency: alert.dependencyName,
           advisory: alert.cveId ?? alert.ghsaId
         });
+      }
 
-        try {
-          const commands = config.repoCommands[repoFullName] ?? {};
-          const fixResult = await this.fixAgent.applyFix({
-            repoFullName,
-            alert,
-            branchPrefix: config.branchPrefix,
-            githubToken: config.githubToken,
-            dryRun: config.dryRun,
-            commands,
-            strategy: config.fixStrategy
-          });
+      const skippedAlerts = alerts.filter((alert) => !alert.patchedVersion);
+      const actionableAlerts = alerts.filter((alert) => Boolean(alert.patchedVersion));
 
-          if (fixResult.skipped) {
+      for (const alert of skippedAlerts) {
+        results.push({
+          repoFullName,
+          alert,
+          status: "skipped",
+          details: "No patched version provided by Dependabot alert"
+        });
+      }
+
+      if (actionableAlerts.length === 0) {
+        continue;
+      }
+
+      const defaultBranch = await getDefaultBranch(client, repoFullName);
+
+      try {
+        const commands = config.repoCommands[repoFullName] ?? {};
+        const fixResult = await this.fixAgent.applyFixBatch({
+          repoFullName,
+          alerts: actionableAlerts,
+          branchPrefix: config.branchPrefix,
+          githubToken: config.githubToken,
+          dryRun: config.dryRun,
+          commands,
+          strategy: config.fixStrategy
+        });
+
+        if (fixResult.skipped) {
+          for (const alert of actionableAlerts) {
             results.push({
               repoFullName,
               alert,
               status: "skipped",
               details: fixResult.reason ?? "Skipped"
             });
-            continue;
           }
+          continue;
+        }
 
-          const testResult = await this.testAgent.run(
-            repoFullName,
-            fixResult.branchName,
-            fixResult.localPath,
-            commands
-          );
+        const testResult = await this.testAgent.run(
+          repoFullName,
+          fixResult.branchName,
+          fixResult.localPath,
+          commands
+        );
 
-          const validation = this.validationAgent.validate(fixResult, testResult);
-          if (!validation.valid) {
+        const validation = this.validationAgent.validate(fixResult, testResult);
+        if (!validation.valid) {
+          for (const alert of actionableAlerts) {
             results.push({
               repoFullName,
               alert,
@@ -131,56 +158,55 @@ export class Orchestrator {
               details: validation.reasons.join("; "),
               failureCategory: "validation"
             });
-            continue;
           }
+          continue;
+        }
 
-          if (config.dryRun) {
+        if (config.dryRun) {
+          for (const alert of actionableAlerts) {
             results.push({
               repoFullName,
               alert,
               status: "created",
               details: "Dry run mode: PR creation skipped"
             });
-            continue;
           }
+          continue;
+        }
 
-          const existingPr = await findOpenPullRequestByHead(
-            client,
-            repoFullName,
-            fixResult.branchName
-          );
+        const existingPr = await findOpenPullRequestByHead(
+          client,
+          repoFullName,
+          fixResult.branchName
+        );
 
-          if (existingPr) {
-            const url = `https://github.com/${repoFullName}/pull/${existingPr}`;
+        if (existingPr) {
+          const url = `https://github.com/${repoFullName}/pull/${existingPr}`;
+          for (const alert of actionableAlerts) {
             results.push({
               repoFullName,
               alert,
               status: "skipped",
               details: `Existing PR detected: ${url}`
             });
-            continue;
           }
+          continue;
+        }
 
-          const placeholder = `https://github.com/${repoFullName}/pull/<new-pr-number>`;
-          const title = `fix(security): ${alert.dependencyName} ${alert.patchedVersion ?? "patch"}`;
-          const body = createPullRequestBody(
-            alert.summary,
-            alert.cveId ?? alert.ghsaId,
-            alert.dependencyName,
-            alert.patchedVersion ?? "unknown",
-            alert.htmlUrl,
-            placeholder
-          );
+        const placeholder = `https://github.com/${repoFullName}/pull/<new-pr-number>`;
+        const title = `fix(security): apply ${actionableAlerts.length} dependency updates`;
+        const body = createPullRequestBody(actionableAlerts, placeholder);
 
-          const pullRequest = await createSecurityPullRequest(
-            client,
-            repoFullName,
-            title,
-            body,
-            fixResult.branchName,
-            defaultBranch
-          );
+        const pullRequest = await createSecurityPullRequest(
+          client,
+          repoFullName,
+          title,
+          body,
+          fixResult.branchName,
+          defaultBranch
+        );
 
+        for (const alert of actionableAlerts) {
           results.push({
             repoFullName,
             alert,
@@ -188,9 +214,11 @@ export class Orchestrator {
             details: `PR created: ${pullRequest.pullUrl}`,
             pullRequest
           });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown error";
-          logError("Alert processing failed", { repoFullName, message });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        logError("Alert processing failed", { repoFullName, message });
+        for (const alert of actionableAlerts) {
           results.push({
             repoFullName,
             alert,
