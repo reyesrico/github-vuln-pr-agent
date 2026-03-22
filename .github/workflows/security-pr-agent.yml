@@ -18,9 +18,9 @@ on:
         required: false
         type: string
       process_only_email_signal:
-        description: "When true, skip processing unless advisory_email (or RAW_GITHUB_EMAIL variable) provides a signal."
+        description: "When true, process only alerts matching advisory_email/RAW_GITHUB_EMAIL; when false, process open alerts automatically."
         required: false
-        default: true
+        default: false
         type: boolean
 
 jobs:

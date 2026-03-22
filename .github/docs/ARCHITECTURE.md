@@ -27,7 +27,8 @@
 - Limits alerts processed per repo.
 - Skips alerts without available patched version.
 - Uses temporary clone directory.
-- `PROCESS_ONLY_EMAIL_SIGNAL=true` prevents backlog churn when no fresh advisory signal is present.
+- `PROCESS_ONLY_EMAIL_SIGNAL=false` enables fully automated schedule-based processing.
+- `PROCESS_ONLY_EMAIL_SIGNAL=true` is optional for targeted advisory-signal-only runs.
 
 ## Operational Model
 1. Trigger via schedule or manual dispatch.
@@ -56,9 +57,10 @@ flowchart TD
 ```
 
 ### Flow Notes
-1. With `PROCESS_ONLY_EMAIL_SIGNAL=true`, the flow starts only when a fresh advisory signal is present.
-2. "Ready to Review and Merge" means the PR passed fix, test, and validation stages.
-3. Email includes created PR links plus skipped/failed details for visibility.
+1. With `PROCESS_ONLY_EMAIL_SIGNAL=false`, scheduled runs process matching open alerts automatically.
+2. With `PROCESS_ONLY_EMAIL_SIGNAL=true`, the flow starts only when a fresh advisory signal is present.
+3. "Ready to Review and Merge" means the PR passed fix, test, and validation stages.
+4. Email includes created PR links plus skipped/failed details for visibility.
 
 ## Sequence Diagram
 ```mermaid
@@ -96,7 +98,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
 	A[Workflow Triggered] --> B{PROCESS_ONLY_EMAIL_SIGNAL=true?}
-	B -- No --> C[Process configured scope]
+	B -- No --> C[Process configured scope automatically]
 	B -- Yes --> D{Fresh advisory email signal present?}
 	D -- No --> E[Skip run to avoid backlog churn]
 	D -- Yes --> F[Filter alerts by CVE/GHSA/dependency]

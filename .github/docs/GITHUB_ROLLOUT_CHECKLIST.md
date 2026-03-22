@@ -43,7 +43,7 @@ Conditional variables (only when EMAIL_ENABLED=true):
 
 Recommended starter values:
 - ACCOUNT_LOGIN=your_account
-- PROCESS_ONLY_EMAIL_SIGNAL=true
+- PROCESS_ONLY_EMAIL_SIGNAL=false
 - ALERT_REPOSITORIES=
 - RAW_GITHUB_EMAIL=
 - DRY_RUN=true
@@ -54,9 +54,9 @@ Recommended starter values:
 - INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true
 - EMAIL_ENABLED=true
 - EMAIL_FAIL_OPEN=true
-- EMAIL_TO=alerts@example.com
-- EMAIL_FROM=sender@example.com
-- SMTP_HOST=smtp.example.com
+- EMAIL_TO=review-inbox@example.com
+- EMAIL_FROM=security-agent@example.com
+- SMTP_HOST=smtp.gmail.com
 - SMTP_PORT=465
 - SMTP_SECURE=true
 
@@ -110,6 +110,6 @@ Add these optional variables for `.github/workflows/e2e-recommendation.yml`:
 Reuse SMTP and EMAIL variables/secrets from the main workflow.
 
 ## 9. Recommended Production Pattern
-1. Keep `PROCESS_ONLY_EMAIL_SIGNAL=true`.
-2. Trigger workflow with `advisory_email` input when a fresh GitHub advisory email arrives.
+1. Keep `PROCESS_ONLY_EMAIL_SIGNAL=false` for fully automated scheduled processing.
+2. Optionally use `advisory_email` input for targeted one-off runs when needed.
 3. Review resulting PR links from notification email.

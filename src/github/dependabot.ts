@@ -19,12 +19,30 @@ export async function listOpenDependabotAlerts(
 ): Promise<DependabotAlert[]> {
   const { owner, repo } = splitRepoFullName(repoFullName);
 
-  const alerts = await client.paginate(client.rest.dependabot.listAlertsForRepo, {
-    owner,
-    repo,
-    state: "open",
-    per_page: 100
-  });
+  let alerts;
+  try {
+    alerts = await client.paginate(client.rest.dependabot.listAlertsForRepo, {
+      owner,
+      repo,
+      state: "open",
+      per_page: 100
+    });
+  } catch (error) {
+    const maybeError = error as { status?: number; message?: string };
+    const status = maybeError.status ?? 0;
+    const message = (maybeError.message ?? "").toLowerCase();
+
+    if (
+      status === 403 ||
+      status === 404 ||
+      message.includes("dependabot alerts are disabled") ||
+      message.includes("resource not accessible")
+    ) {
+      return [];
+    }
+
+    throw error;
+  }
 
   const mapped: DependabotAlert[] = alerts
     .map((alert) => {

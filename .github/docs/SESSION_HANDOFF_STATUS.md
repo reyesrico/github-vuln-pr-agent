@@ -64,7 +64,8 @@ Automate remediation from newly received GitHub advisory signals to tested, vali
 - Findings documented in `.github/docs/E2E_EXECUTION_FINDINGS.md`.
 13. Event-driven production mode:
 - Added advisory signal parsing from raw GitHub advisory email.
-- Added `PROCESS_ONLY_EMAIL_SIGNAL=true` gate to avoid backlog processing.
+- Added optional `PROCESS_ONLY_EMAIL_SIGNAL=true` gate for targeted advisory-only processing.
+- Set fully automated default mode with `PROCESS_ONLY_EMAIL_SIGNAL=false`.
 - Added workflow_dispatch automation inputs (`advisory_email`, `account_login`, `alert_repositories`, `process_only_email_signal`).
 - Updated production rollout/docs to use placeholders only.
 
@@ -81,14 +82,16 @@ Test suite status:
 
 ## Configuration Pending (GitHub side)
 - Keep `DRY_RUN=true` during validation.
-- Use manual dispatch with `advisory_email` for each new advisory event.
+- Scheduled runs work automatically with `PROCESS_ONLY_EMAIL_SIGNAL=false`.
+- Optional targeted dispatch uses `advisory_email` with `PROCESS_ONLY_EMAIL_SIGNAL=true`.
 - Switch to `DRY_RUN=false` only after successful dry-run validation.
 
 ## Recommended Next Steps
 1. Tune `REPO_COMMANDS` per repository to improve validation pass rate.
-2. Keep event gate enabled and drive runs from fresh advisory email content.
-3. Move to live mode (`DRY_RUN=false`) after dry-run confidence is achieved.
-4. Optionally enable branch protections and auto-merge policies.
+2. Keep fully automated mode enabled for scheduled processing.
+3. Use event gate only for targeted one-off advisory runs.
+4. Move to live mode (`DRY_RUN=false`) after dry-run confidence is achieved.
+5. Optionally enable branch protections and auto-merge policies.
 
 ## How To Resume Quickly In Copilot
 Prompt suggestion:

@@ -8,7 +8,7 @@ describe("ValidationAgent", () => {
 
   it("passes when lockfile changed and tests succeeded", () => {
     const fix: FixResult = {
-      repoFullName: "reyesrico/react-test",
+      repoFullName: "owner/repo1",
       branchName: "chore/security/tar/6.2.1",
       changedFiles: ["package-lock.json"],
       localPath: "/tmp/repo",
@@ -16,7 +16,7 @@ describe("ValidationAgent", () => {
       skipped: false
     };
     const test: TestResult = {
-      repoFullName: "reyesrico/react-test",
+      repoFullName: "owner/repo1",
       branchName: "chore/security/tar/6.2.1",
       commands: [],
       success: true
@@ -29,7 +29,7 @@ describe("ValidationAgent", () => {
 
   it("fails when checks fail", () => {
     const fix: FixResult = {
-      repoFullName: "reyesrico/react-test",
+      repoFullName: "owner/repo1",
       branchName: "chore/security/tar/6.2.1",
       changedFiles: ["README.md"],
       localPath: "/tmp/repo",
@@ -37,7 +37,7 @@ describe("ValidationAgent", () => {
       skipped: false
     };
     const test: TestResult = {
-      repoFullName: "reyesrico/react-test",
+      repoFullName: "owner/repo1",
       branchName: "chore/security/tar/6.2.1",
       commands: [],
       success: false
