@@ -1,12 +1,16 @@
 import type { FixResult, TestResult, ValidationResult } from "../types.js";
 
 function hasRelevantManifestFile(changedFiles: string[]): boolean {
+  const relevantNames = new Set([
+    "package-lock.json",
+    "package.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "npm-shrinkwrap.json"
+  ]);
+
   return changedFiles.some(
-    (file) =>
-      file === "package-lock.json" ||
-      file === "package.json" ||
-      file.endsWith("/package-lock.json") ||
-      file.endsWith("/package.json")
+    (file) => relevantNames.has(file) || [...relevantNames].some((name) => file.endsWith(`/${name}`))
   );
 }
 

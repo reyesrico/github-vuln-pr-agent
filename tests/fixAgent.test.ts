@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   createOverrideConflictFallbackCommand,
   isGitRefNamespaceConflict,
-  isNpmOverrideConflict
+  isNpmOverrideConflict,
+  resolveInstallWorkingDirectory
 } from "../src/agents/fixAgent.js";
 
 describe("fixAgent helpers", () => {
@@ -32,5 +33,19 @@ describe("fixAgent helpers", () => {
     const command = "npm ci --package-lock-only";
 
     expect(createOverrideConflictFallbackCommand(command)).toBeUndefined();
+  });
+
+  it("resolves install working directory from alert manifest path", () => {
+    const repo = "/tmp/repo";
+    const resolved = resolveInstallWorkingDirectory(repo, "apps/web/package-lock.json");
+
+    expect(resolved).toBe("/tmp/repo/apps/web");
+  });
+
+  it("falls back to repo root for unsafe manifest paths", () => {
+    const repo = "/tmp/repo";
+    const resolved = resolveInstallWorkingDirectory(repo, "../../outside/package-lock.json");
+
+    expect(resolved).toBe(repo);
   });
 });

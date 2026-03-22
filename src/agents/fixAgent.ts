@@ -46,6 +46,18 @@ function parseChangedFiles(statusOutput: string): string[] {
     .filter(Boolean);
 }
 
+export function resolveInstallWorkingDirectory(repoDir: string, manifestPath: string): string {
+  const manifestDir = path.dirname(manifestPath || "package.json");
+  const resolved = path.resolve(repoDir, manifestDir);
+
+  // Keep execution inside cloned repository even if manifestPath is malformed.
+  if (resolved === repoDir || resolved.startsWith(`${repoDir}${path.sep}`)) {
+    return resolved;
+  }
+
+  return repoDir;
+}
+
 function isNpmInstallCommand(command: string): boolean {
   return /(^|\s)npm\s+install(\s|$)/.test(command);
 }
@@ -126,16 +138,21 @@ export class FixAgent {
       throw new Error(`Branch creation failed: ${checkout.output}`);
     }
 
+    const installWorkingDirectory = resolveInstallWorkingDirectory(
+      repoDir,
+      input.alert.manifestPath
+    );
+
     const installCommand = input.commands.install
       ? input.commands.install
       : `npm install ${input.alert.dependencyName}@${input.alert.patchedVersion} --package-lock-only`;
 
-    let installResult = await runCommand(installCommand, repoDir);
+    let installResult = await runCommand(installCommand, installWorkingDirectory);
     let legacyAttemptOutput: string | undefined;
     if (!installResult.success && input.strategy.retryWithLegacyPeerDeps) {
       if (canRetryWithLegacyPeerDeps(installCommand)) {
         const retryCommand = withLegacyPeerDeps(installCommand);
-        const retryResult = await runCommand(retryCommand, repoDir);
+        const retryResult = await runCommand(retryCommand, installWorkingDirectory);
 
         if (retryResult.success) {
           installResult = retryResult;
@@ -148,14 +165,17 @@ export class FixAgent {
     if (!installResult.success && isNpmOverrideConflict(installResult.output)) {
       const fallbackCommand = createOverrideConflictFallbackCommand(installCommand);
       if (fallbackCommand) {
-        const fallbackResult = await runCommand(fallbackCommand, repoDir);
+        const fallbackResult = await runCommand(fallbackCommand, installWorkingDirectory);
 
         if (fallbackResult.success) {
           installResult = fallbackResult;
         } else {
           if (input.strategy.retryWithLegacyPeerDeps && canRetryWithLegacyPeerDeps(fallbackCommand)) {
             const retryFallbackCommand = withLegacyPeerDeps(fallbackCommand);
-            const retryFallbackResult = await runCommand(retryFallbackCommand, repoDir);
+            const retryFallbackResult = await runCommand(
+              retryFallbackCommand,
+              installWorkingDirectory
+            );
             if (retryFallbackResult.success) {
               installResult = retryFallbackResult;
             } else {
@@ -193,7 +213,7 @@ export class FixAgent {
         repoFullName: input.repoFullName,
         branchName,
         changedFiles,
-        localPath: repoDir,
+        localPath: installWorkingDirectory,
         commitMessage: "",
         skipped: true,
         reason: "No file changes after dependency update"
@@ -245,7 +265,7 @@ export class FixAgent {
       repoFullName: input.repoFullName,
       branchName,
       changedFiles,
-      localPath: repoDir,
+      localPath: installWorkingDirectory,
       commitMessage,
       skipped: false
     };
