@@ -13,25 +13,85 @@ interface EmailConfig {
   pass?: string;
 }
 
+interface RepoEmailSummary {
+  repoFullName: string;
+  fixes: string[];
+  status: "created" | "failed" | "skipped";
+  failureCategory?: string;
+  pullRequestUrl?: string;
+  pullRequestNumber?: number;
+  details: string[];
+}
+
+function summarizeByRepository(results: ProcessedAlertResult[]): RepoEmailSummary[] {
+  const grouped = new Map<string, ProcessedAlertResult[]>();
+
+  for (const result of results) {
+    const current = grouped.get(result.repoFullName) ?? [];
+    current.push(result);
+    grouped.set(result.repoFullName, current);
+  }
+
+  return [...grouped.entries()].map(([repoFullName, repoResults]) => {
+    const hasFailed = repoResults.some((result) => result.status === "failed");
+    const hasCreated = repoResults.some((result) => result.status === "created");
+    const status: RepoEmailSummary["status"] = hasFailed
+      ? "failed"
+      : hasCreated
+        ? "created"
+        : "skipped";
+
+    const pullRequest = repoResults.find((result) => result.pullRequest)?.pullRequest;
+    const failureCategory = repoResults.find((result) => result.failureCategory)?.failureCategory;
+    const fixes = repoResults.map((result) => {
+      const advisory = result.alert.cveId ?? result.alert.ghsaId;
+      return `${result.alert.dependencyName} (${advisory})`;
+    });
+
+    const details = [...new Set(repoResults.map((result) => result.details))];
+
+    const summary: RepoEmailSummary = {
+      repoFullName,
+      fixes,
+      status,
+      details
+    };
+
+    if (failureCategory) {
+      summary.failureCategory = failureCategory;
+    }
+
+    if (pullRequest?.pullUrl) {
+      summary.pullRequestUrl = pullRequest.pullUrl;
+      summary.pullRequestNumber = pullRequest.pullNumber;
+    }
+
+    return summary;
+  });
+}
+
 function buildHtmlReport(results: ProcessedAlertResult[]): string {
-  const rows = results
-    .map((result) => {
-      const prLink = result.pullRequest
-        ? `<a href="${result.pullRequest.pullUrl}">PR #${result.pullRequest.pullNumber}</a>`
+  const summaries = summarizeByRepository(results);
+
+  const rows = summaries
+    .map((summary) => {
+      const prLink = summary.pullRequestUrl
+        ? `<a href="${summary.pullRequestUrl}">PR #${summary.pullRequestNumber}</a>`
         : "N/A";
-      const mergeCommand = result.pullRequest
-        ? `gh pr merge ${result.pullRequest.pullUrl} --auto --squash`
+      const mergeCommand = summary.pullRequestUrl
+        ? `gh pr merge ${summary.pullRequestUrl} --auto --squash`
         : "N/A";
+      const fixesHtml = summary.fixes.map((fix) => `- ${fix}`).join("<br>");
+      const detailsHtml = summary.details.join("<br>");
 
       return `<tr>
-<td>${result.repoFullName}</td>
-<td>${result.alert.dependencyName}</td>
-<td>${result.alert.cveId ?? result.alert.ghsaId}</td>
-<td>${result.status}</td>
-    <td>${result.failureCategory ?? "N/A"}</td>
+<td>${summary.repoFullName}</td>
+<td>${fixesHtml}</td>
+<td>${summary.status}</td>
+    <td>${summary.failureCategory ?? "N/A"}</td>
 <td>${prLink}</td>
 <td><code>${mergeCommand}</code></td>
-<td>${result.details}</td>
+<td>${detailsHtml}</td>
 </tr>`;
     })
     .join("\n");
@@ -43,8 +103,7 @@ function buildHtmlReport(results: ProcessedAlertResult[]): string {
 <thead>
 <tr>
 <th>Repository</th>
-<th>Dependency</th>
-<th>Advisory</th>
+<th>Fixes</th>
 <th>Status</th>
 <th>Failure Category</th>
 <th>Pull Request</th>
@@ -74,9 +133,10 @@ export async function sendEmailNotification(
     auth: config.user && config.pass ? { user: config.user, pass: config.pass } : undefined
   });
 
-  const successful = results.filter((result) => result.status === "created").length;
-  const failed = results.filter((result) => result.status === "failed").length;
-  const skipped = results.filter((result) => result.status === "skipped").length;
+  const summaries = summarizeByRepository(results);
+  const successful = summaries.filter((summary) => summary.status === "created").length;
+  const failed = summaries.filter((summary) => summary.status === "failed").length;
+  const skipped = summaries.filter((summary) => summary.status === "skipped").length;
 
   await transporter.sendMail({
     to: config.to,
