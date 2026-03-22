@@ -1,8 +1,8 @@
-# GitHub Copilot Setup Guide — reyesrico/github-vuln-pr-agent
+# GitHub Copilot Setup Guide — owner/github-vuln-pr-agent
 
 This file is intended as context for **GitHub Copilot in VS Code**.
 It describes every configuration value that must be set in the repository so that
-`reyesrico@hotmail.com` receives notification emails from the Security PR Agent workflow.
+your review inbox receives notification emails from the Security PR Agent workflow.
 
 ---
 
@@ -13,8 +13,8 @@ Set these under **Settings → Secrets and variables → Actions → Secrets (Re
 | Secret name | Value |
 |---|---|
 | `SECURITY_AGENT_GITHUB_TOKEN` | A fine-grained PAT with Contents read/write, Pull requests write, Dependabot alerts read on all target repositories |
-| `SMTP_USER` | `reyesrico@hotmail.com` |
-| `SMTP_PASS` | Hotmail app password (generate at https://account.microsoft.com/security — requires 2FA enabled) |
+| `SMTP_USER` | `security-agent@example.com` |
+| `SMTP_PASS` | Provider app password |
 
 ---
 
@@ -26,8 +26,8 @@ Set these under **Settings → Secrets and variables → Actions → Variables (
 
 | Variable | Value |
 |---|---|
-| `ACCOUNT_LOGIN` | `reyesrico` |
-| `PROCESS_ONLY_EMAIL_SIGNAL` | `true` |
+| `ACCOUNT_LOGIN` | `your_account` |
+| `PROCESS_ONLY_EMAIL_SIGNAL` | `false` |
 | `DRY_RUN` | `true` (set to `false` when ready for live PR creation) |
 | `VULN_SEVERITIES` | `critical,high,moderate` |
 | `BRANCH_PREFIX` | `chore/security` |
@@ -41,11 +41,11 @@ Set these under **Settings → Secrets and variables → Actions → Variables (
 |---|---|
 | `EMAIL_ENABLED` | `true` |
 | `EMAIL_FAIL_OPEN` | `true` |
-| `EMAIL_TO` | `reyesrico@hotmail.com` |
-| `EMAIL_FROM` | `reyesrico@hotmail.com` |
-| `SMTP_HOST` | `smtp-mail.outlook.com` |
-| `SMTP_PORT` | `587` |
-| `SMTP_SECURE` | `false` |
+| `EMAIL_TO` | `review-inbox@example.com` |
+| `EMAIL_FROM` | `security-agent@example.com` |
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `465` |
+| `SMTP_SECURE` | `true` |
 
 ### Optional scope variables (leave blank unless needed)
 
@@ -63,18 +63,18 @@ Copy `.env.example` to `.env` and fill in:
 ```env
 # Required
 GITHUB_TOKEN=<your-github-token>
-ACCOUNT_LOGIN=reyesrico
+ACCOUNT_LOGIN=your_account
 
 # Email notifications
 EMAIL_ENABLED=true
 EMAIL_FAIL_OPEN=true
-EMAIL_TO=reyesrico@hotmail.com
-EMAIL_FROM=reyesrico@hotmail.com
-SMTP_HOST=smtp-mail.outlook.com
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=reyesrico@hotmail.com
-SMTP_PASS=<your-hotmail-app-password>
+EMAIL_TO=review-inbox@example.com
+EMAIL_FROM=security-agent@example.com
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=security-agent@example.com
+SMTP_PASS=<your-app-password>
 
 # Optional behavior defaults
 DRY_RUN=true
@@ -83,7 +83,7 @@ BRANCH_PREFIX=chore/security
 MAX_ALERTS_PER_REPO=3
 INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true
 REPO_COMMANDS={}
-PROCESS_ONLY_EMAIL_SIGNAL=true
+PROCESS_ONLY_EMAIL_SIGNAL=false
 ```
 
 ---
@@ -103,13 +103,13 @@ via repository variables and secrets.
 After filling `.env`, run the rollout script to push all variables and secrets to GitHub automatically:
 
 ```bash
-./scripts/rollout-actions.sh reyesrico/github-vuln-pr-agent .env --dispatch
+./scripts/rollout-actions.sh owner/repo .env --dispatch
 ```
 
 To switch from dry-run to live mode:
 
 ```bash
-./scripts/set-production-mode.sh reyesrico/github-vuln-pr-agent --enable-email
+./scripts/set-production-mode.sh owner/repo --enable-email
 ```
 
 ---
@@ -117,28 +117,25 @@ To switch from dry-run to live mode:
 ## 6. Trigger the Workflow Manually
 
 ```bash
-gh workflow run security-pr-agent.yml --repo reyesrico/github-vuln-pr-agent
+gh workflow run security-pr-agent.yml --repo owner/repo
 ```
 
 Event-driven dispatch with an advisory email:
 
 ```bash
 gh workflow run security-pr-agent.yml \
-  --repo reyesrico/github-vuln-pr-agent \
+  --repo owner/repo \
   -f advisory_email="$(cat advisory-email.txt)" \
-  -f process_only_email_signal=true
+  -f process_only_email_signal=false
 ```
 
 ---
 
-## 7. Hotmail / Outlook SMTP Notes
+## 7. SMTP Notes
 
-- **Host:** `smtp-mail.outlook.com`
-- **Port:** `587`
-- **Encryption:** STARTTLS (`SMTP_SECURE=false` — the client upgrades the connection after connecting)
-- **Authentication:** Use an **app password**, not your regular Microsoft account password
-- App passwords require 2-step verification to be enabled on the Microsoft account
-- Generate at: https://account.microsoft.com/security → Advanced security options → App passwords
+- Use your provider's SMTP host/port/secure settings.
+- Use an app password when your provider requires it.
+- Keep SMTP credentials in secrets only; never hardcode.
 
 ---
 
@@ -146,10 +143,9 @@ gh workflow run security-pr-agent.yml \
 
 If GitHub Copilot is asked to fix or extend this project, the following context applies:
 
-- Notification email recipient and sender: `reyesrico@hotmail.com`
-- SMTP provider: Hotmail/Outlook (`smtp-mail.outlook.com:587`, STARTTLS)
+- Notification email recipient and sender are environment-driven.
+- SMTP provider is environment-driven.
 - All email and SMTP values flow from environment variables / GitHub Actions variables
 - The secret `SMTP_PASS` must never be hardcoded; it is always injected at runtime
-- `SMTP_SECURE=false` is correct for port 587 STARTTLS — do **not** change it to `true` (that is for port 465 SSL)
 - Dry-run mode (`DRY_RUN=true`) must remain the default until explicitly switched off
 - The rollout script (`scripts/rollout-actions.sh`) automates setting all variables and secrets from a local `.env` file

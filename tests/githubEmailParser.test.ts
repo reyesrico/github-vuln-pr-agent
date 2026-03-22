@@ -9,19 +9,19 @@ describe("extractRepositoriesFromGithubEmail", () => {
   it("extracts unique repository names", () => {
     const raw = `
 Affected Repositories
-reyesrico/CovidCharts
+  owner/repo1
 package-lock.json
-reyesrico/workshop-app
+  owner/repo2
 package-lock.json
-reyesrico/react-test
+  owner/repo3
 `;
 
     const repos = extractRepositoriesFromGithubEmail(raw);
 
     expect(repos).toEqual([
-      "reyesrico/CovidCharts",
-      "reyesrico/workshop-app",
-      "reyesrico/react-test"
+      "owner/repo1",
+      "owner/repo2",
+      "owner/repo3"
     ]);
   });
 

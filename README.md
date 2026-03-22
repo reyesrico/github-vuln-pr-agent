@@ -32,8 +32,9 @@ cp .env.example .env
 - Event mode (recommended): set `RAW_GITHUB_EMAIL` with a fresh advisory email payload
 - Auto-discovery mode: leave both empty and use `ACCOUNT_LOGIN` to scope owned repos
 
-5. Keep backlog noise disabled:
-- `PROCESS_ONLY_EMAIL_SIGNAL=true` means the agent only processes alerts when a new advisory signal exists in `RAW_GITHUB_EMAIL`.
+5. Choose processing mode:
+- `PROCESS_ONLY_EMAIL_SIGNAL=false` (recommended for full automation) processes open alerts on schedule.
+- `PROCESS_ONLY_EMAIL_SIGNAL=true` processes only alerts that match a provided advisory signal.
 
 6. Validate configuration and quality:
 
@@ -67,13 +68,19 @@ npm run dev
 - Validation Agent: verifies branch readiness.
 - Orchestrator Agent: coordinates all steps and notifications.
 
-## Event-Driven Production Model
-1. A fresh GitHub advisory email arrives.
-2. Paste the raw advisory email text into workflow input `advisory_email` (manual dispatch), or set `RAW_GITHUB_EMAIL` variable before run.
-3. Agent extracts advisory signal (CVE/GHSA/dependency + repositories).
-4. Agent processes only matching alerts for that signal.
-5. PRs that pass fix, test, and validation are created as ready-to-review.
-6. Email report is sent with repository, alert, status, and PR links.
+## Production Model
+1. Scheduled workflow runs automatically each hour.
+2. Agent discovers scope from explicit repositories or account auto-discovery.
+3. Agent reads open Dependabot alerts and applies severity filters.
+4. PRs that pass fix, test, and validation are created as ready-to-review.
+5. Email report is sent with repository, alert, status, and PR links.
+6. Optional targeted mode: provide advisory signal (`advisory_email`/`RAW_GITHUB_EMAIL`) with `PROCESS_ONLY_EMAIL_SIGNAL=true`.
+
+## Signal Gate Explained
+- `PROCESS_ONLY_EMAIL_SIGNAL` controls **when alert processing starts**, not whether the output notification email is sent.
+- `false` (recommended): fully automated mode. Each scheduled run processes open matching alerts.
+- `true`: targeted mode. The run only processes alerts when an advisory signal is provided (`advisory_email` or `RAW_GITHUB_EMAIL`).
+- Use `true` when you want strict event-by-event control; use `false` when you want unattended continuous remediation.
 
 ## Email Configuration
 - Set `EMAIL_TO` to the review inbox.
@@ -131,11 +138,11 @@ Production mode command:
 ./scripts/rollout-actions.sh owner/repo .env
 ```
 
-2. Keep event gate enabled:
+2. Set processing mode:
 
 ```bash
 # in GitHub Variables
-PROCESS_ONLY_EMAIL_SIGNAL=true
+PROCESS_ONLY_EMAIL_SIGNAL=false
 ```
 
 3. Switch to live mode:
@@ -166,7 +173,7 @@ gh workflow run security-pr-agent.yml \
 - Merge shortcut is included in the email as a GitHub CLI command.
 - Email reports include failure category for faster production triage.
 - `EMAIL_FAIL_OPEN=true` keeps production remediation running even if email provider is temporarily down.
-- `PROCESS_ONLY_EMAIL_SIGNAL=true` prevents processing old pending alerts when no new advisory signal is present.
+- `PROCESS_ONLY_EMAIL_SIGNAL=false` is recommended for fully automated scheduled processing.
 - Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.
 
 ## E2E Recommendation Simulation

@@ -15,12 +15,12 @@ import { logError, logInfo } from "../utils/logger.js";
 
 const schema = z.object({
   GITHUB_TOKEN: z.string().min(1),
-  E2E_TARGET_REPO: z.string().default("reyesrico/react-test"),
+  E2E_TARGET_REPO: z.string().default("your_account/repo1"),
   E2E_LIBRARY: z.string().default("is-odd"),
   E2E_LIBRARY_VERSION: z.string().default("3.0.1"),
   E2E_RAW_EMAIL: z
     .string()
-    .default("Subject: recommendation\nPlease add is-odd to reyesrico/react-test"),
+    .default("Subject: recommendation\nPlease add is-odd to your_account/repo1"),
   E2E_EMAIL_MODE: z.enum(["ethereal", "smtp", "off"]).default("ethereal"),
   E2E_FLOW_MODE: z.enum(["add-only-close", "add-remove-merge"]).default("add-only-close"),
   E2E_AUTO_CLOSE_ON_ERROR: z.string().default("true"),

@@ -31,7 +31,7 @@
 - Added `EMAIL_FAIL_OPEN=true` config so production remediation continues even if notification fails.
 - Added `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true` fallback for npm peer conflict retries.
 - Added failure category reporting for easier production triage.
-- Added event gate `PROCESS_ONLY_EMAIL_SIGNAL=true` to avoid processing stale backlog alerts when no new advisory signal is supplied.
+- Added optional event gate `PROCESS_ONLY_EMAIL_SIGNAL=true` for targeted advisory runs; default automation mode uses `PROCESS_ONLY_EMAIL_SIGNAL=false`.
 
 ## Generic Rerun Command
 

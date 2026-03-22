@@ -14,7 +14,7 @@ const schema = z.object({
   ACCOUNT_LOGIN: z.string().optional(),
   ALERT_REPOSITORIES: z.string().optional(),
   RAW_GITHUB_EMAIL: z.string().optional(),
-  PROCESS_ONLY_EMAIL_SIGNAL: z.string().default("true"),
+  PROCESS_ONLY_EMAIL_SIGNAL: z.string().default("false"),
   DRY_RUN: z.string().default("true"),
   VULN_SEVERITIES: z.string().default("critical,high,moderate"),
   BRANCH_PREFIX: z.string().default("chore/security"),
