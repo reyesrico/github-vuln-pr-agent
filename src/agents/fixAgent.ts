@@ -86,6 +86,13 @@ function appendFlag(command: string, flag: string): string {
   return `${command} ${flag}`;
 }
 
+function createOverrideAlignmentCommand(dependencyName: string, version: string): string {
+  const dependencyLiteral = JSON.stringify(dependencyName);
+  const versionLiteral = JSON.stringify(version);
+
+  return `node -e "const fs=require('fs'); const p='package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.overrides=j.overrides||{}; j.overrides[${dependencyLiteral}]=${versionLiteral}; fs.writeFileSync(p, JSON.stringify(j, null, 2)+'\\n');"`;
+}
+
 export function isGitRefNamespaceConflict(output: string): boolean {
   return /cannot lock ref 'refs\/heads\/.+': 'refs\/heads\/.+' exists; cannot create/i.test(output);
 }
@@ -179,9 +186,29 @@ export class FixAgent {
             if (retryFallbackResult.success) {
               installResult = retryFallbackResult;
             } else {
-              throw new Error(
-                `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}`
+              const alignOverrideCommand = createOverrideAlignmentCommand(
+                input.alert.dependencyName,
+                input.alert.patchedVersion
               );
+              const alignOverrideResult = await runCommand(
+                alignOverrideCommand,
+                installWorkingDirectory
+              );
+
+              if (alignOverrideResult.success) {
+                const postAlignRetry = await runCommand(retryFallbackCommand, installWorkingDirectory);
+                if (postAlignRetry.success) {
+                  installResult = postAlignRetry;
+                } else {
+                  throw new Error(
+                    `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment (${alignOverrideCommand}) did not recover install: ${postAlignRetry.output}`
+                  );
+                }
+              } else {
+                throw new Error(
+                  `Dependency update failed: ${installResult.output}\nRetry (${fallbackCommand}) failed: ${fallbackResult.output}\nRetry (${retryFallbackCommand}) failed: ${retryFallbackResult.output}\nOverride alignment failed: ${alignOverrideResult.output}`
+                );
+              }
             }
           } else {
             throw new Error(

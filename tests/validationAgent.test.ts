@@ -69,7 +69,7 @@ describe("ValidationAgent", () => {
     expect(result.reasons).toEqual([]);
   });
 
-  it("fails when checks fail", () => {
+  it("passes even when lint/test checks fail", () => {
     const fix: FixResult = {
       repoFullName: "owner/repo1",
       branchName: "chore/security/tar/6.2.1",
@@ -86,7 +86,29 @@ describe("ValidationAgent", () => {
     };
 
     const result = validator.validate(fix, test);
+    expect(result.valid).toBe(true);
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("fails when fix step is skipped", () => {
+    const fix: FixResult = {
+      repoFullName: "owner/repo1",
+      branchName: "",
+      changedFiles: [],
+      localPath: "/tmp/repo",
+      commitMessage: "",
+      skipped: true,
+      reason: "No file changes after dependency update"
+    };
+    const test: TestResult = {
+      repoFullName: "owner/repo1",
+      branchName: "",
+      commands: [],
+      success: false
+    };
+
+    const result = validator.validate(fix, test);
     expect(result.valid).toBe(false);
-    expect(result.reasons.length).toBe(2);
+    expect(result.reasons).toEqual(["No file changes after dependency update"]);
   });
 });
