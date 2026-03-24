@@ -98,16 +98,47 @@ async function alignOverrideInPackageJson(
   try {
     const raw = await readFile(packageJsonPath, "utf8");
     const parsed = JSON.parse(raw) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
       overrides?: Record<string, string>;
     };
 
+    const applyVersionToDependencySection = (
+      section: Record<string, string> | undefined,
+      sectionName: string
+    ): string[] => {
+      if (!section || !section[dependencyName]) {
+        return [];
+      }
+
+      section[dependencyName] = version;
+      return [`Updated ${sectionName}.${dependencyName} to ${version}`];
+    };
+
+    const updates = [
+      ...applyVersionToDependencySection(parsed.dependencies, "dependencies"),
+      ...applyVersionToDependencySection(parsed.devDependencies, "devDependencies"),
+      ...applyVersionToDependencySection(parsed.peerDependencies, "peerDependencies")
+    ];
+
     parsed.overrides = parsed.overrides ?? {};
     parsed.overrides[dependencyName] = version;
+    updates.push(`Updated overrides.${dependencyName} to ${version}`);
+
+    for (const [key, value] of Object.entries(parsed.overrides)) {
+      if (!key.startsWith(`${dependencyName}@`) || typeof value !== "string") {
+        continue;
+      }
+
+      parsed.overrides[key] = version;
+      updates.push(`Updated overrides.${key} to ${version}`);
+    }
 
     await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
     return {
       success: true,
-      output: `Updated overrides.${dependencyName} in package.json`
+      output: updates.join("; ")
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
