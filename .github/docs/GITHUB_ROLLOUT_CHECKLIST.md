@@ -36,6 +36,7 @@ Required core variables:
 Optional scope variables:
 - ALERT_REPOSITORIES
 - RAW_GITHUB_EMAIL
+- ADVISORY_SIGNAL_PAYLOAD
 
 Conditional variables (only when EMAIL_ENABLED=true):
 - EMAIL_TO
@@ -46,6 +47,7 @@ Recommended starter values:
 - PROCESS_ONLY_EMAIL_SIGNAL=true
 - ALERT_REPOSITORIES=
 - RAW_GITHUB_EMAIL=
+- ADVISORY_SIGNAL_PAYLOAD=
 - DRY_RUN=true
 - VULN_SEVERITIES=critical,high,moderate
 - BRANCH_PREFIX=chore/security
@@ -78,6 +80,10 @@ Expected behavior:
 - Pass `advisory_email` input in workflow dispatch (required).
 - Validate logs show only advisory-matching alerts are processed.
 
+Alternative dispatch for listener simulation:
+- Send `repository_dispatch` with `event_type=vulnerability-alert-forwarded`
+- Include `client_payload.signal_payload` with repository + advisory identifiers.
+
 ## 5. Verify Outputs
 
 - Confirm email report arrives (if enabled).
@@ -96,6 +102,18 @@ Expected behavior:
 - Optionally configure auto-merge policy for security-fix PRs.
 - Keep MAX_ALERTS_PER_REPO conservative to control blast radius.
 
+## 8. Deploy Per-Repository Listener (Recommended)
+
+For each monitored repository:
+- Add workflow file `.github/workflows/repository-vulnerability-listener.yml` from central template [../templates/repository-vulnerability-listener.yml](../templates/repository-vulnerability-listener.yml)
+- Set variable `CENTRAL_SECURITY_AGENT_REPO=owner/github-vuln-pr-agent`
+- Set secret `CENTRAL_SECURITY_AGENT_DISPATCH_TOKEN` with dispatch-capable token
+
+One-command rollout per target repo:
+- `./scripts/install-repo-listener.sh owner/target-repo owner/github-vuln-pr-agent .env`
+
+## 9. Optional Unattended E2E Setup
+
 ## 8. Optional Unattended E2E Setup
 
 Add these optional variables for `.github/workflows/e2e-recommendation.yml`:
@@ -109,8 +127,9 @@ Add these optional variables for `.github/workflows/e2e-recommendation.yml`:
 
 Reuse SMTP and EMAIL variables/secrets from the main workflow.
 
-## 9. Recommended Production Pattern
+## 10. Recommended Production Pattern
 1. Keep workflow alert-driven (no schedule trigger).
-2. Dispatch with `advisory_email` only when a new alert payload arrives.
-3. Review resulting PR links from notification email.
-4. Non-actionable repeated skips are suppressed from email when there are no new alerts and no actionable outcomes.
+2. Prefer target-repo listener dispatch (`vulnerability-alert-forwarded`) on new alerts.
+3. Keep manual `advisory_email` dispatch for emergency replay/debug.
+4. Review resulting PR links from notification email.
+5. Non-actionable repeated skips are suppressed from email when there are no new alerts and no actionable outcomes.

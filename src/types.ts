@@ -19,6 +19,14 @@ export interface AlertSignal {
   dependencyNames: string[];
 }
 
+export interface AdvisorySignalPayload {
+  repository?: string;
+  repositories?: string[];
+  cve_ids?: string[];
+  ghsa_ids?: string[];
+  dependency_names?: string[];
+}
+
 export interface RepoCommands {
   install?: string;
   lint?: string;

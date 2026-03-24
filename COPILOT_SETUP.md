@@ -53,6 +53,14 @@ Set these under **Settings → Secrets and variables → Actions → Variables (
 |---|---|
 | `ALERT_REPOSITORIES` | *(leave empty for auto-discovery)* |
 | `RAW_GITHUB_EMAIL` | *(paste advisory email text here for event-driven mode)* |
+| `ADVISORY_SIGNAL_PAYLOAD` | *(optional JSON payload for local simulation/debug only)* |
+
+### Target repository listener variables/secrets (set in each monitored repo)
+
+| Variable/Secret | Value |
+|---|---|
+| `CENTRAL_SECURITY_AGENT_REPO` (variable) | `owner/github-vuln-pr-agent` |
+| `CENTRAL_SECURITY_AGENT_DISPATCH_TOKEN` (secret) | Token allowed to call repository dispatch in central repo |
 
 ---
 
@@ -130,10 +138,18 @@ gh api repos/owner/repo/dispatches \
   -f client_payload='{"advisory_email":"<raw advisory body>"}'
 ```
 
+Deploy per-repository listener workflow (recommended production model):
+
+```bash
+./scripts/install-repo-listener.sh owner/target-repo owner/github-vuln-pr-agent .env
+```
+
+The script installs `.github/workflows/repository-vulnerability-listener.yml` into the target repository and configures forwarding settings.
+
 ## 7. Runtime Trigger Policy
 
 - The workflow does not run on a schedule.
-- The workflow requires advisory payload input to execute.
+- The workflow requires either advisory email input or structured listener payload to execute.
 - Repeated non-actionable runs are not emailed when no new alerts are detected and no actionable outcomes exist.
 
 ---

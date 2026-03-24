@@ -5,6 +5,7 @@ import {
   extractAlertSignalFromGithubEmail,
   extractRepositoriesFromGithubEmail
 } from "./parsers/githubEmailParser.js";
+import { parseDispatchSignal } from "./parsers/advisoryDispatchParser.js";
 import type { AlertSignal, FixStrategy, RepoCommands, Severity } from "./types.js";
 
 dotenv.config({ quiet: true });
@@ -14,6 +15,7 @@ const schema = z.object({
   ACCOUNT_LOGIN: z.string().optional(),
   ALERT_REPOSITORIES: z.string().optional(),
   RAW_GITHUB_EMAIL: z.string().optional(),
+  ADVISORY_SIGNAL_PAYLOAD: z.string().optional(),
   PROCESS_ONLY_EMAIL_SIGNAL: z.string().default("false"),
   DRY_RUN: z.string().default("true"),
   VULN_SEVERITIES: z.string().default("critical,high,moderate"),
@@ -76,7 +78,8 @@ function parseRepositories(raw: z.infer<typeof schema>): string[] {
   const fromEmail = raw.RAW_GITHUB_EMAIL
     ? extractRepositoriesFromGithubEmail(raw.RAW_GITHUB_EMAIL)
     : [];
-  const merged = new Set([...configured, ...fromEmail]);
+  const fromDispatchPayload = parseDispatchSignal(raw.ADVISORY_SIGNAL_PAYLOAD).repositories;
+  const merged = new Set([...configured, ...fromEmail, ...fromDispatchPayload]);
   return [...merged];
 }
 
@@ -109,9 +112,11 @@ export interface AppConfig {
 export function loadConfig(): AppConfig {
   const parsed = schema.parse(process.env);
   const repositories = parseRepositories(parsed);
-  const alertSignal = parsed.RAW_GITHUB_EMAIL
+  const dispatchSignal = parseDispatchSignal(parsed.ADVISORY_SIGNAL_PAYLOAD).alertSignal;
+  const emailSignal = parsed.RAW_GITHUB_EMAIL
     ? extractAlertSignalFromGithubEmail(parsed.RAW_GITHUB_EMAIL)
     : undefined;
+  const alertSignal = dispatchSignal ?? emailSignal;
 
   const emailEnabled = parseBoolean(parsed.EMAIL_ENABLED);
   const emailTo = parseOptionalEmail(parsed.EMAIL_TO);

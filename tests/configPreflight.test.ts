@@ -44,6 +44,7 @@ describe("buildConfigPreflight", () => {
     expect(preflight.repositoryDiscovery).toEqual({
       configuredList: true,
       viaGithubAdvisoryEmail: false,
+      viaDispatchPayload: false,
       autoDiscoverAllOwnedRepos: false,
       accountLoginFilter: "(not set)"
     });

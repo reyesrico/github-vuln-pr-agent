@@ -39,7 +39,11 @@ export function buildConfigPreflight(
     repositoryDiscovery: {
       configuredList: hasValue(env.ALERT_REPOSITORIES),
       viaGithubAdvisoryEmail: hasValue(env.RAW_GITHUB_EMAIL),
-      autoDiscoverAllOwnedRepos: !hasValue(env.ALERT_REPOSITORIES) && !hasValue(env.RAW_GITHUB_EMAIL),
+      viaDispatchPayload: hasValue(env.ADVISORY_SIGNAL_PAYLOAD),
+      autoDiscoverAllOwnedRepos:
+        !hasValue(env.ALERT_REPOSITORIES) &&
+        !hasValue(env.RAW_GITHUB_EMAIL) &&
+        !hasValue(env.ADVISORY_SIGNAL_PAYLOAD),
       accountLoginFilter: config.accountLogin ?? "(not set)"
     },
     alertSelection: {

@@ -39,6 +39,26 @@ describe("loadConfig", () => {
     expect(config.alertSignal?.dependencyNames).toEqual(["tar"]);
   });
 
+  it("extracts repository and signal from ADVISORY_SIGNAL_PAYLOAD", () => {
+    process.env = buildBaseEnv({
+      ADVISORY_SIGNAL_PAYLOAD: JSON.stringify({
+        repository: "owner/repo-listener",
+        cve_ids: ["CVE-2026-31802"],
+        ghsa_ids: ["ghsa-9hjg-pf89-8w2r"],
+        dependency_names: ["tar"]
+      })
+    });
+
+    const config = loadConfig();
+
+    expect(config.repositories).toEqual(["owner/repo-listener"]);
+    expect(config.alertSignal).toEqual({
+      cveIds: ["CVE-2026-31802"],
+      ghsaIds: ["GHSA-9HJG-PF89-8W2R"],
+      dependencyNames: ["tar"]
+    });
+  });
+
   it("allows email fields to be omitted when EMAIL_ENABLED=false", () => {
     process.env = buildBaseEnv();
 

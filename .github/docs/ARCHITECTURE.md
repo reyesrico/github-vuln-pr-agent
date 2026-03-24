@@ -9,13 +9,15 @@
 - Repository scope via one of:
 	- `ALERT_REPOSITORIES` explicit list.
 	- Auto-discovery (`ACCOUNT_LOGIN` with empty `ALERT_REPOSITORIES`).
-	- Advisory email signal (`RAW_GITHUB_EMAIL`, `workflow_dispatch` input `advisory_email`, or `repository_dispatch` payload).
+	- Advisory email signal (`RAW_GITHUB_EMAIL`, `workflow_dispatch` input `advisory_email`).
+	- Structured listener signal (`ADVISORY_SIGNAL_PAYLOAD` from `repository_dispatch` payload).
 - Event gate: `PROCESS_ONLY_EMAIL_SIGNAL`.
 - Optional per-repo command overrides (`REPO_COMMANDS`).
 
 ## Components
 - `src/github/dependabot.ts`: Dependabot alert access and PR creation helpers.
 - `src/parsers/githubEmailParser.ts`: advisory-email parsing (repositories, CVE, GHSA, dependency signal).
+- `src/parsers/advisoryDispatchParser.ts`: structured dispatch parsing for repository listener events.
 - `src/agents/fixAgent.ts`: Branch creation and dependency fix.
 - `src/agents/testAgent.ts`: Lint/test execution.
 - `src/agents/validationAgent.ts`: Final readiness checks.
@@ -32,7 +34,7 @@
 
 ## Operational Model
 1. Trigger via `workflow_dispatch` or `repository_dispatch` with advisory payload.
-2. Resolve target repositories from explicit list, advisory email, or account auto-discovery.
+2. Resolve target repositories from explicit list, advisory email, listener signal payload, or account auto-discovery.
 3. If advisory signal is missing: fail fast and stop processing.
 4. Fetch open Dependabot alerts and filter by severity + advisory signal.
 5. For each repository: reuse matching open Dependabot PR when possible, otherwise run batched local fix flow (one PR per repo).
@@ -41,19 +43,20 @@
 ## Flow Diagram
 ```mermaid
 flowchart TD
-	A[New GitHub Security Advisory Alert Arrives] --> B[Agent Parses Advisory Email Signal]
-	B --> C[Agent Selects Matching Repositories and Alerts]
-	C --> D[Agent Creates Fix Branch and Applies Dependency Update]
-	D --> E[Agent Runs Lint and Tests]
-	E --> F{Validation Passed?}
-	F -- No --> G[Mark Alert as Failed or Skipped in Report]
-	F -- Yes --> H[Agent Creates Pull Request]
-	H --> I[PR Status: Ready to Review and Merge]
-	I --> J[Agent Builds Summary Report]
-	G --> J
-	J --> K[Agent Sends Email Notification]
-	K --> L[User Receives Email with PR Links]
-	L --> M[User Reviews and Merges PR]
+	A[New GitHub Security Advisory Alert Arrives] --> B[Target Repo Listener Dispatches Signal Payload]
+	B --> C[Central Workflow Parses Structured Signal]
+	C --> D[Agent Selects Matching Repositories and Alerts]
+	D --> E[Agent Creates Fix Branch and Applies Dependency Update]
+	E --> F[Agent Runs Lint and Tests]
+	F --> G{Validation Passed?}
+	G -- No --> H[Mark Alert as Failed or Skipped in Report]
+	G -- Yes --> I[Agent Creates Pull Request]
+	I --> J[PR Status: Ready to Review and Merge]
+	J --> K[Agent Builds Summary Report]
+	H --> K
+	K --> L[Agent Sends Email Notification]
+	L --> M[User Receives Email with PR Links]
+	M --> N[User Reviews and Merges PR]
 ```
 
 ### Flow Notes
@@ -67,13 +70,15 @@ flowchart TD
 sequenceDiagram
 	autonumber
 	participant GH as GitHub Advisory System
-	participant WF as GitHub Actions Workflow
+	participant LR as Target Repo Listener
+	participant WF as Central Actions Workflow
 	participant AG as Vulnerability PR Agent
 	participant RP as Target Repository
 	participant EM as SMTP Mail Service
 	participant US as User
 
-	GH->>WF: New advisory email/event context
+	GH->>LR: repository_vulnerability_alert(create)
+	LR->>WF: repository_dispatch(vulnerability-alert-forwarded)
 	WF->>AG: Run agent with advisory signal
 	AG->>AG: Parse CVE/GHSA/dependency + repository scope
 	AG->>RP: Fetch matching Dependabot alerts

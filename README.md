@@ -30,6 +30,7 @@ cp .env.example .env
 4. Choose repository selection mode:
 - Explicit list mode: set `ALERT_REPOSITORIES=owner/repo1,owner/repo2`
 - Event mode (recommended): set `RAW_GITHUB_EMAIL` with a fresh advisory email payload
+- Listener event mode (recommended for production): set `ADVISORY_SIGNAL_PAYLOAD` with structured advisory JSON payload
 - Auto-discovery mode: leave both empty and use `ACCOUNT_LOGIN` to scope owned repos
 
 5. Choose processing mode:
@@ -108,18 +109,38 @@ Why this matters:
 - The parser looks for CVE/GHSA IDs, dependency names, and repository names.
 - If those are missing and `PROCESS_ONLY_EMAIL_SIGNAL=true`, the run skips processing.
 
+### ADVISORY_SIGNAL_PAYLOAD Example
+
+```json
+{
+	"repository": "your_account/repo1",
+	"cve_ids": ["CVE-2026-31802"],
+	"ghsa_ids": ["GHSA-9HJG-PF89-8W2R"],
+	"dependency_names": ["tar"]
+}
+```
+
+Why this matters:
+- This payload is emitted by the target-repo vulnerability listener workflow.
+- It avoids inbox parsing and triggers the central agent immediately when the alert is created.
+
 ## Running In Dev
 - Local runs use the same gate behavior as production.
-- If `RAW_GITHUB_EMAIL` is empty, local run will skip processing when signal mode is enabled.
+- If both `RAW_GITHUB_EMAIL` and `ADVISORY_SIGNAL_PAYLOAD` are empty, local run will skip processing when signal mode is enabled.
 - For local event simulation, use:
 	- `PROCESS_ONLY_EMAIL_SIGNAL=true`
-	- `RAW_GITHUB_EMAIL` populated with advisory email content
+	- either `RAW_GITHUB_EMAIL` or `ADVISORY_SIGNAL_PAYLOAD` populated
 
 Example local commands:
 
 ```bash
 # Targeted local event simulation
 PROCESS_ONLY_EMAIL_SIGNAL=true RAW_GITHUB_EMAIL="$(cat advisory-email.txt)" DRY_RUN=true npm run dev
+```
+
+```bash
+# Targeted listener payload simulation
+PROCESS_ONLY_EMAIL_SIGNAL=true ADVISORY_SIGNAL_PAYLOAD='{"repository":"owner/repo","ghsa_ids":["GHSA-xxxx-yyyy-zzzz"],"dependency_names":["tar"]}' DRY_RUN=true npm run dev
 ```
 
 ## Email Configuration
@@ -135,6 +156,7 @@ Add repository variables:
 - `ACCOUNT_LOGIN` (recommended)
 - `ALERT_REPOSITORIES` (optional)
 - `RAW_GITHUB_EMAIL` (optional local/debug fallback)
+- `ADVISORY_SIGNAL_PAYLOAD` (optional local/debug fallback)
 - `DRY_RUN`
 - `VULN_SEVERITIES`
 - `BRANCH_PREFIX`
@@ -197,6 +219,17 @@ Event-driven dispatch through repository_dispatch (recommended for integrations)
 gh api repos/owner/repo/dispatches \
 	-f event_type='advisory-email-received' \
 	-f client_payload='{"advisory_email":"<raw advisory body>"}'
+```
+
+Listener-based dispatch (recommended for full automation):
+- Add [./.github/templates/repository-vulnerability-listener.yml](.github/templates/repository-vulnerability-listener.yml) to each target repository at `.github/workflows/repository-vulnerability-listener.yml`.
+- Set target-repo variable `CENTRAL_SECURITY_AGENT_REPO=owner/github-vuln-pr-agent`.
+- Set target-repo secret `CENTRAL_SECURITY_AGENT_DISPATCH_TOKEN` with a token that can dispatch to the central repo.
+
+Automate listener rollout to one target repo:
+
+```bash
+./scripts/install-repo-listener.sh owner/target-repo owner/github-vuln-pr-agent .env
 ```
 
 ## Notes
