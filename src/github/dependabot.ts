@@ -10,6 +10,16 @@ function normalizeSeverity(input: string): Severity {
   return "low";
 }
 
+function isSupportedNodeManifestPath(manifestPath: string): boolean {
+  return (
+    manifestPath.includes("package-lock.json") ||
+    manifestPath.includes("package.json") ||
+    manifestPath.includes("yarn.lock") ||
+    manifestPath.includes("pnpm-lock.yaml") ||
+    manifestPath.includes("npm-shrinkwrap.json")
+  );
+}
+
 export async function listOpenDependabotAlerts(
   client: Octokit,
   repoFullName: string,
@@ -71,7 +81,7 @@ export async function listOpenDependabotAlerts(
     })
     .filter((alert) => severities.includes(alert.severity))
     .filter((alert) => alert.dependencyEcosystem === "npm")
-    .filter((alert) => alert.manifestPath.includes("package-lock.json"))
+    .filter((alert) => isSupportedNodeManifestPath(alert.manifestPath))
     .filter((alert) => {
       if (!alertSignal) {
         return true;
