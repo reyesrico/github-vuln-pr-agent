@@ -1,6 +1,8 @@
 name: Security PR Agent
 
 on:
+  schedule:
+    - cron: '0 8 * * *'
   repository_dispatch:
     types:
       - advisory-email-received
@@ -8,8 +10,8 @@ on:
   workflow_dispatch:
     inputs:
       advisory_email:
-        description: "Raw GitHub advisory email text to process. Required in alert-driven mode."
-        required: true
+        description: "Raw GitHub advisory email text (for signal mode). Leave empty to sweep all repos."
+        required: false
         type: string
       account_login:
         description: "Optional account/org login to scope auto-discovered repositories."
@@ -42,12 +44,12 @@ jobs:
         run: npm ci
 
       - name: Validate advisory signal payload
+        if: github.event_name == 'repository_dispatch'
         env:
-          RAW_GITHUB_EMAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.advisory_email || github.event.client_payload.advisory_email || '' }}
-          ADVISORY_SIGNAL_PAYLOAD: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload.signal_payload) || '' }}
+          ADVISORY_SIGNAL_PAYLOAD: ${{ toJson(github.event.client_payload.signal_payload) }}
         run: |
-          if [[ -z "${RAW_GITHUB_EMAIL// }" && -z "${ADVISORY_SIGNAL_PAYLOAD// }" ]]; then
-            echo "Missing advisory payload. This workflow runs only when a new alert payload is received."
+          if [[ -z "${ADVISORY_SIGNAL_PAYLOAD// }" || "${ADVISORY_SIGNAL_PAYLOAD}" == "null" ]]; then
+            echo "Missing signal_payload in repository_dispatch client_payload."
             exit 1
           fi
 
@@ -58,7 +60,7 @@ jobs:
           ALERT_REPOSITORIES: ${{ inputs.alert_repositories || vars.ALERT_REPOSITORIES }}
           RAW_GITHUB_EMAIL: ${{ github.event_name == 'workflow_dispatch' && inputs.advisory_email || github.event.client_payload.advisory_email || '' }}
           ADVISORY_SIGNAL_PAYLOAD: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload.signal_payload) || '' }}
-          PROCESS_ONLY_EMAIL_SIGNAL: true
+          PROCESS_ONLY_EMAIL_SIGNAL: ${{ (github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_dispatch' && inputs.advisory_email != '')) && 'true' || 'false' }}
           DRY_RUN: ${{ vars.DRY_RUN }}
           VULN_SEVERITIES: ${{ vars.VULN_SEVERITIES }}
           BRANCH_PREFIX: ${{ vars.BRANCH_PREFIX }}
