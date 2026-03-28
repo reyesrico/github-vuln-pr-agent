@@ -1,6 +1,24 @@
 # GitHub Vulnerability PR Agent
 
-Automates security remediation across repositories by turning GitHub advisory signals into tested, review-ready pull requests.
+Automates security remediation across repositories by turning GitHub Dependabot alerts into tested, review-ready pull requests — fully automatic, no manual intervention required.
+
+## How It Works
+
+When a new Dependabot vulnerability alert is created in any monitored repository:
+
+1. The per-repo listener workflow fires immediately on the `dependabot_alert` event.
+2. It forwards a structured signal payload to the central agent via `repository_dispatch`.
+3. The central agent processes matching alerts, creates a fix branch, runs lint/tests, and opens a PR.
+4. You receive a Gmail summary email with PR links and ready-to-run merge commands.
+
+As a safety net, the agent also runs a **daily sweep at 8am UTC** across all owned repos to catch anything the listeners may have missed.
+
+## What You Receive
+
+- **GitHub emails** (raw): Dependabot still sends its own alert emails directly — these are from GitHub's notification system and are not controlled by this agent.
+- **Agent emails** (actionable): Sent to your configured `EMAIL_TO` when there are new alerts or PRs to review. Contains a table with repo, fix, status, PR link, and merge command. Suppressed on quiet days with no new actionable outcomes.
+
+On a day with a new alert you may receive **both** — one from GitHub announcing the alert, and one from this agent with the PR already created.
 
 ## Prerequisites
 - Node.js 20+
@@ -29,21 +47,17 @@ cp .env.example .env
 
 4. Choose repository selection mode:
 - Explicit list mode: set `ALERT_REPOSITORIES=owner/repo1,owner/repo2`
-- Event mode (recommended): set `RAW_GITHUB_EMAIL` with a fresh advisory email payload
-- Listener event mode (recommended for production): set `ADVISORY_SIGNAL_PAYLOAD` with structured advisory JSON payload
-- Auto-discovery mode: leave both empty and use `ACCOUNT_LOGIN` to scope owned repos
+- Listener event mode (recommended for production): structured payload forwarded automatically by per-repo listener
+- Auto-discovery mode: leave both empty and use `ACCOUNT_LOGIN` to scope all owned repos
 
-5. Choose processing mode:
-- The workflow is alert-driven only. It requires advisory payload input and runs in signal-only mode.
-
-6. Validate configuration and quality:
+5. Validate configuration and quality:
 
 ```bash
 npm run preflight
 npm run check
 ```
 
-7. Start the agent locally:
+6. Start the agent locally:
 
 ```bash
 npm run dev
@@ -55,12 +69,11 @@ npm run dev
 - Keep `.env` outside version control and treat it as sensitive.
 
 ## What it does
-- Reads Dependabot alerts and filters them using either explicit repo scope or advisory-email signal.
-- Creates a branch with the dependency bump to the patched version.
-- Runs lint and test commands.
-- Validates that security-relevant files changed.
-- Creates a pull request when checks pass.
-- Sends an email report with PR links and merge commands only for processed alerts.
+- Reads open Dependabot alerts filtered by severity (critical, high, moderate) and ecosystem (npm only).
+- Reuses an existing open Dependabot PR when one already covers the alert.
+- Otherwise creates a fix branch, applies the dependency bump, runs lint/tests, validates changed files, and opens a PR.
+- One PR per repository (batched) — never multiple PRs for the same repo in one run.
+- Sends a Gmail summary email with PR links and merge commands only when there are actionable outcomes or newly seen alerts.
 
 ## Multi-agent pipeline
 - Fix Agent: applies dependency update in a branch.
@@ -68,74 +81,48 @@ npm run dev
 - Validation Agent: verifies branch readiness.
 - Orchestrator Agent: coordinates all steps and notifications.
 
-## Production Model
-1. Workflow runs only when an advisory payload is dispatched.
-2. Agent discovers scope from advisory signal and configured account/repository scope.
-3. Agent reads matching Dependabot alerts and applies severity filters.
-4. Orchestrator reuses existing Dependabot PRs when possible; otherwise falls back to batched local fixes (one PR per repo).
-5. Email report is sent only when there are actionable outcomes or newly seen alerts.
+## Production Trigger Model
 
-## Signal Gate Explained
-- Alert processing is enforced in signal-only mode in workflow runtime.
-- Advisory payload is required for execution.
-- Broad periodic scans are intentionally disabled.
+| Trigger | When | Signal mode |
+|---|---|---|
+| `dependabot_alert` listener | Immediately on new alert in target repo | Signal-scoped (one alert) |
+| Daily schedule `0 8 * * *` | Every day at 8am UTC | Full sweep (all repos) |
+| `workflow_dispatch` (manual) | On demand | Signal if `advisory_email` provided, full sweep if left empty |
+| `repository_dispatch` `vulnerability-alert-forwarded` | Integration / custom tooling | Signal-scoped |
 
-### RAW_GITHUB_EMAIL Examples
-Good example (contains dependency, CVE, and repositories):
-
-```text
-[your_account] A security advisory on tar affects at least one repository
-
-node-tar Symlink Path Traversal via Drive-Relative Linkpath
-High severity
-tar
-CVE-2026-31802
-
-Affected Repositories
-your_account/repo1
-package-lock.json
-your_account/repo2
-package-lock.json
-```
-
-Insufficient example (missing advisory signal and repositories):
-
-```text
-Security update available.
-Please review your dependencies.
-```
-
-Why this matters:
-- The parser looks for CVE/GHSA IDs, dependency names, and repository names.
-- If those are missing and `PROCESS_ONLY_EMAIL_SIGNAL=true`, the run skips processing.
+## Alert Processing Rules
+- Severity filter: `critical`, `high`, `moderate`
+- Ecosystem filter: npm only
+- Manifest filter: `package-lock.json`, `package.json`, `yarn.lock`, `pnpm-lock.yaml`, `npm-shrinkwrap.json`
+- One PR per repo per run (batched)
+- Reuses open Dependabot PRs first; falls back to local fix branch
+- Email suppressed if all alerts already notified and no new actionable outcomes
 
 ### ADVISORY_SIGNAL_PAYLOAD Example
 
+This JSON payload is built and forwarded automatically by the per-repo listener workflow. You do not need to construct it manually in production.
+
 ```json
 {
+	"source": "dependabot_alert",
 	"repository": "your_account/repo1",
 	"cve_ids": ["CVE-2026-31802"],
 	"ghsa_ids": ["GHSA-9HJG-PF89-8W2R"],
-	"dependency_names": ["tar"]
+	"dependency_names": ["tar"],
+	"alert_number": 42,
+	"advisory_url": "https://github.com/your_account/repo1/security/dependabot/42"
 }
 ```
 
-Why this matters:
-- This payload is emitted by the target-repo vulnerability listener workflow.
-- It avoids inbox parsing and triggers the central agent immediately when the alert is created.
-
 ## Running In Dev
-- Local runs use the same gate behavior as production.
-- If both `RAW_GITHUB_EMAIL` and `ADVISORY_SIGNAL_PAYLOAD` are empty, local run will skip processing when signal mode is enabled.
-- For local event simulation, use:
-	- `PROCESS_ONLY_EMAIL_SIGNAL=true`
-	- either `RAW_GITHUB_EMAIL` or `ADVISORY_SIGNAL_PAYLOAD` populated
+- Without a signal payload the agent runs in full-sweep mode (`PROCESS_ONLY_EMAIL_SIGNAL=false`) and scans all repos.
+- To simulate a specific alert locally, provide `ADVISORY_SIGNAL_PAYLOAD` and set `PROCESS_ONLY_EMAIL_SIGNAL=true`.
 
 Example local commands:
 
 ```bash
-# Targeted local event simulation
-PROCESS_ONLY_EMAIL_SIGNAL=true RAW_GITHUB_EMAIL="$(cat advisory-email.txt)" DRY_RUN=true npm run dev
+# Full sweep (scans all repos, same as daily schedule)
+DRY_RUN=true npm run dev
 ```
 
 ```bash
@@ -235,12 +222,14 @@ Automate listener rollout to one target repo:
 ## Notes
 - Start with `DRY_RUN=true` until you validate behavior.
 - For repositories with custom command needs, set `REPO_COMMANDS` as JSON.
-- Install retries can automatically fall back to `--legacy-peer-deps` when `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true`.
-- Merge shortcut is included in the email as a GitHub CLI command.
+- Install retries automatically fall back to `--legacy-peer-deps` when `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true`.
+- Merge shortcut is included in the email as a `gh pr merge` command.
 - Email reports include failure category for faster production triage.
-- `EMAIL_FAIL_OPEN=true` keeps production remediation running even if email provider is temporarily down.
-- Repeated non-actionable alerts are suppressed from email when there are no new alerts and no actionable outcomes.
-- Skipped alerts usually mean either no patched version exists yet or there are no effective file changes for current repo state.
+- `EMAIL_FAIL_OPEN=true` keeps production remediation running even if the email provider is temporarily down.
+- Repeated non-actionable alerts are suppressed from email — no noise on quiet days.
+- Skipped alerts usually mean no patched version exists yet or the repo is already up to date.
+- GitHub's own Dependabot emails are separate from agent emails — both may arrive on the same day for the same alert.
+- To add a new repo to the monitored set: `./scripts/install-repo-listener.sh owner/new-repo owner/github-vuln-pr-agent .env`
 - Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.
 
 ## E2E Recommendation Simulation
