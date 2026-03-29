@@ -208,6 +208,15 @@ export function isNpmOverrideConflict(output: string): boolean {
   return /\bEOVERRIDE\b|Override for .+ conflicts with direct dependency/i.test(output);
 }
 
+/**
+ * Extracts the package name that caused the EOVERRIDE conflict from npm error output.
+ * e.g. "Override for node-forge@^1.4.0 conflicts with direct dependency" → "node-forge"
+ */
+export function extractOverrideConflictPackage(output: string): string | undefined {
+  const match = /Override for ([^@\s]+)(?:@[^\s]*)? conflicts with direct dependency/i.exec(output);
+  return match?.[1];
+}
+
 export function createOverrideConflictFallbackCommand(command: string): string | undefined {
   if (!isNpmInstallCommand(command) || !includesPackageLockOnly(command)) {
     return undefined;
@@ -258,9 +267,15 @@ export class FixAgent {
           if (retryFallbackResult.success) {
             installResult = retryFallbackResult;
           } else {
+            // The EOVERRIDE may be caused by a pre-existing conflict for a different
+            // package than the one being installed. Extract the actual conflicting
+            // package name from the error so we remove the right override entry.
+            const conflictPackage =
+              extractOverrideConflictPackage(retryFallbackResult.output) ??
+              alert.dependencyName;
             const alignOverrideResult = await alignOverrideInPackageJson(
               installWorkingDirectory,
-              alert.dependencyName,
+              conflictPackage,
               alert.patchedVersion ?? ""
             );
 
