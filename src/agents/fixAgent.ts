@@ -122,17 +122,40 @@ async function alignOverrideInPackageJson(
       ...applyVersionToDependencySection(parsed.peerDependencies, "peerDependencies")
     ];
 
-    parsed.overrides = parsed.overrides ?? {};
-    parsed.overrides[dependencyName] = version;
-    updates.push(`Updated overrides.${dependencyName} to ${version}`);
+    // npm does not allow overriding a package that is already a direct dependency.
+    // If the package appears in any dependency section, remove it from overrides instead
+    // of updating it — keeping the override would cause EOVERRIDE on every subsequent install.
+    const isDirectDependency =
+      Boolean(parsed.dependencies?.[dependencyName]) ||
+      Boolean(parsed.devDependencies?.[dependencyName]) ||
+      Boolean(parsed.peerDependencies?.[dependencyName]);
 
-    for (const [key, value] of Object.entries(parsed.overrides)) {
-      if (!key.startsWith(`${dependencyName}@`) || typeof value !== "string") {
-        continue;
+    parsed.overrides = parsed.overrides ?? {};
+
+    if (isDirectDependency) {
+      if (parsed.overrides[dependencyName] !== undefined) {
+        delete parsed.overrides[dependencyName];
+        updates.push(`Removed overrides.${dependencyName} (conflicts with direct dependency)`);
       }
 
-      parsed.overrides[key] = version;
-      updates.push(`Updated overrides.${key} to ${version}`);
+      for (const key of Object.keys(parsed.overrides)) {
+        if (key.startsWith(`${dependencyName}@`)) {
+          delete parsed.overrides[key];
+          updates.push(`Removed overrides.${key} (conflicts with direct dependency)`);
+        }
+      }
+    } else {
+      parsed.overrides[dependencyName] = version;
+      updates.push(`Updated overrides.${dependencyName} to ${version}`);
+
+      for (const [key, value] of Object.entries(parsed.overrides)) {
+        if (!key.startsWith(`${dependencyName}@`) || typeof value !== "string") {
+          continue;
+        }
+
+        parsed.overrides[key] = version;
+        updates.push(`Updated overrides.${key} to ${version}`);
+      }
     }
 
     await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
