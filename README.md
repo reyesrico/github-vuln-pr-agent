@@ -1,6 +1,6 @@
 # GitHub Vulnerability PR Agent
 
-Automates security remediation across repositories by turning GitHub Dependabot alerts into tested, review-ready pull requests — fully automatic, no manual intervention required.
+Automates security remediation across repositories by turning GitHub Dependabot alerts into tested pull requests with policy-based outcomes: simple fixes can auto-merge, while complex or breaking remediations stay PR-only for manual review.
 
 ## How It Works
 
@@ -9,14 +9,13 @@ When a new Dependabot vulnerability alert is created in any monitored repository
 1. The per-repo listener workflow fires immediately on the `dependabot_alert` event.
 2. It forwards a structured signal payload to the central agent via `repository_dispatch`.
 3. The central agent processes matching alerts, creates a fix branch, runs lint/tests, and opens a PR.
-4. You receive a Gmail summary email with PR links and ready-to-run merge commands.
-
-As a safety net, the agent also runs a **daily sweep at 8am UTC** across all owned repos to catch anything the listeners may have missed.
+4. The agent applies merge policy: low-risk dependency-only fixes may auto-merge; risky/breaking fixes are left as manual-review PRs.
+5. You receive a summary email with created, auto-merged, skipped, and failed outcomes plus recommended actions.
 
 ## What You Receive
 
 - **GitHub emails** (raw): Dependabot still sends its own alert emails directly — these are from GitHub's notification system and are not controlled by this agent.
-- **Agent emails** (actionable): Sent to your configured `EMAIL_TO` when there are new alerts or PRs to review. Contains a table with repo, fix, status, PR link, and merge command. Suppressed on quiet days with no new actionable outcomes.
+- **Agent emails** (actionable): Sent to your configured `EMAIL_TO` when there are new alerts or PR outcomes to act on. Contains status by repo (auto-merged, manual review, skipped, failed), PR links, and suggested actions. Suppressed on quiet days with no new actionable outcomes.
 
 On a day with a new alert you may receive **both** — one from GitHub announcing the alert, and one from this agent with the PR already created.
 
@@ -70,10 +69,14 @@ npm run dev
 
 ## What it does
 - Reads open Dependabot alerts filtered by severity (critical, high, moderate) and ecosystem (npm only).
+- Suppresses duplicate processing of unchanged alert sets per repository.
 - Reuses an existing open Dependabot PR when one already covers the alert.
-- Otherwise creates a fix branch, applies the dependency bump, runs lint/tests, validates changed files, and opens a PR.
+- Otherwise creates a fix branch, applies remediation, runs lint/tests, validates changed files, and opens a PR.
 - One PR per repository (batched) — never multiple PRs for the same repo in one run.
-- Sends a Gmail summary email with PR links and merge commands only when there are actionable outcomes or newly seen alerts.
+- Runs install/test commands with per-repo runtime resolution (`REPO_COMMANDS.nodeVersion`, then `engines.node`, then default runtime).
+- Auto-merges low-risk/simple dependency-only outcomes after successful validation.
+- Keeps difficult/breaking upgrades as PR-only and marks them for manual review.
+- Sends a summary email only when there are actionable outcomes or newly seen alerts.
 
 ## Multi-agent pipeline
 - Fix Agent: applies dependency update in a branch.
@@ -86,8 +89,7 @@ npm run dev
 | Trigger | When | Signal mode |
 |---|---|---|
 | `dependabot_alert` listener | Immediately on new alert in target repo | Signal-scoped (one alert) |
-| Daily schedule `0 8 * * *` | Every day at 8am UTC | Full sweep (all repos) |
-| `workflow_dispatch` (manual) | On demand | Signal if `advisory_email` provided, full sweep if left empty |
+| `workflow_dispatch` (manual) | On demand | Signal-scoped when advisory payload is provided |
 | `repository_dispatch` `vulnerability-alert-forwarded` | Integration / custom tooling | Signal-scoped |
 
 ## Alert Processing Rules
@@ -95,7 +97,10 @@ npm run dev
 - Ecosystem filter: npm only
 - Manifest filter: `package-lock.json`, `package.json`, `yarn.lock`, `pnpm-lock.yaml`, `npm-shrinkwrap.json`
 - One PR per repo per run (batched)
+- Duplicate unchanged alert sets are suppressed per repository
 - Reuses open Dependabot PRs first; falls back to local fix branch
+- Auto-merges low-risk/simple fixes after successful validation
+- Classifies force/major compatibility paths as `breaking-upgrade` and keeps them manual
 - Email suppressed if all alerts already notified and no new actionable outcomes
 
 ### ADVISORY_SIGNAL_PAYLOAD Example
@@ -115,15 +120,10 @@ This JSON payload is built and forwarded automatically by the per-repo listener 
 ```
 
 ## Running In Dev
-- Without a signal payload the agent runs in full-sweep mode (`PROCESS_ONLY_EMAIL_SIGNAL=false`) and scans all repos.
+- In production mode, run with advisory signal payloads only (`PROCESS_ONLY_EMAIL_SIGNAL=true`).
 - To simulate a specific alert locally, provide `ADVISORY_SIGNAL_PAYLOAD` and set `PROCESS_ONLY_EMAIL_SIGNAL=true`.
 
 Example local commands:
-
-```bash
-# Full sweep (scans all repos, same as daily schedule)
-DRY_RUN=true npm run dev
-```
 
 ```bash
 # Targeted listener payload simulation
@@ -223,10 +223,12 @@ Automate listener rollout to one target repo:
 - Start with `DRY_RUN=true` until you validate behavior.
 - For repositories with custom command needs, set `REPO_COMMANDS` as JSON.
 - Install retries automatically fall back to `--legacy-peer-deps` when `INSTALL_RETRY_WITH_LEGACY_PEER_DEPS=true`.
-- Merge shortcut is included in the email as a `gh pr merge` command.
+- Auto-merged outcomes are reported directly in email; manual-review outcomes include PR links and suggested actions.
 - Email reports include failure category for faster production triage.
+- `breaking-upgrade` failure category highlights force/major-risk remediation paths.
 - `EMAIL_FAIL_OPEN=true` keeps production remediation running even if the email provider is temporarily down.
 - Repeated non-actionable alerts are suppressed from email — no noise on quiet days.
+- Duplicate unchanged alert sets are suppressed per repository to prevent repeat churn.
 - Skipped alerts usually mean no patched version exists yet or the repo is already up to date.
 - GitHub's own Dependabot emails are separate from agent emails — both may arrive on the same day for the same alert.
 - To add a new repo to the monitored set: `./scripts/install-repo-listener.sh owner/new-repo owner/github-vuln-pr-agent .env`

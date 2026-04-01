@@ -4,7 +4,7 @@
 - Repository: https://github.com/your_account/github-vuln-pr-agent
 - Local path: /path/to/github-vuln-pr-agent
 - Branch: main
-- Latest known commit message: feat: enforce alert-driven workflow execution
+- Latest known commit message: feat(agent): auto-merge simple fixes and per-repo node runtime
 
 ## Objective
 Automate remediation from newly received GitHub advisory signals to tested, validated, review-ready PR creation, then notify by email.
@@ -70,6 +70,26 @@ Automate remediation from newly received GitHub advisory signals to tested, vali
 - Added repository_dispatch event support (`advisory-email-received`).
 - Added notification suppression for repeated non-actionable skip-only runs.
 - Updated production rollout/docs to use placeholders only.
+14. Listener and alert-processing hardening:
+- Updated listener behavior to avoid zero-job noise paths.
+- Applied repo-specific schedule-only listener mode where needed to stop push-triggered noise.
+- Reduced skipped remediation cases by broadening fallback handling when patched versions are unclear.
+15. Outcome quality and operator signal improvements:
+- Added duplicate unchanged alert-set suppression per repository.
+- Added explicit `breaking-upgrade` classification for force/major-risk remediation paths.
+- Enhanced email action guidance and detail summarization for actionable outcomes.
+16. Runtime and merge policy upgrades:
+- Added per-repo runtime execution support with `REPO_COMMANDS[repo].nodeVersion` override.
+- Added `engines.node`-aware runtime fallback detection.
+- Added simple low-risk auto-merge policy after successful validation.
+- Kept difficult/breaking remediations as PR-only for manual review.
+
+## Key Learnings
+1. Advisory-only triggering is necessary but not sufficient; listener job design must avoid producing noisy "no jobs were run" runs.
+2. Missing patched-version metadata should not immediately short-circuit remediation attempts; controlled fallback paths recover additional fixes.
+3. Runtime mismatch (for example Node 20 vs default) is a primary source of false remediation failures and must be resolved per repository.
+4. Not all successful fixes should be merged the same way: low-risk dependency-only changes can be auto-merged, but breaking upgrades must remain manual.
+5. Notification quality matters operationally; concise summaries with explicit recommendation categories improve triage speed.
 
 ## Testing Status
 Last full quality run passed locally with:
@@ -79,8 +99,8 @@ Last full quality run passed locally with:
 - npm run check
 
 Test suite status:
-- 5 test files
-- 14 tests passed
+- 7 test files
+- 33 tests passed
 
 ## Configuration Pending (GitHub side)
 - Keep `DRY_RUN=true` during validation.

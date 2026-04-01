@@ -8,10 +8,13 @@ Automate the flow from open Dependabot alerts (and optional advisory signal targ
 - Ingest advisory signal from raw GitHub advisory email text.
 - Resolve repository scope automatically (explicit list or account auto-discovery).
 - Filter open Dependabot alerts by severity, and optionally by advisory signal.
+- Suppress duplicate unchanged alert sets per repository to avoid repeat churn.
 - For each repository, reuse existing Dependabot PR when possible; otherwise attempt batched dependency patch upgrades in one branch.
+- Execute install/test commands using per-repository runtime resolution (`nodeVersion` override, then `engines.node`, then default).
 - Run repository tests/lint commands.
 - Validate generated changes and create one PR per repo.
-- Send email summary with PR links and merge command for review-ready items, including suggested action guidance.
+- Auto-merge low-risk/simple dependency-only PRs; keep breaking/complex remediations as manual-review PRs.
+- Send email summary with created/auto-merged/manual/skipped/failed outcomes and suggested action guidance.
 
 ## Multi-Agent Design
 1. Fix Agent
@@ -31,7 +34,7 @@ Automate the flow from open Dependabot alerts (and optional advisory signal targ
 - Fetches alerts.
 - Applies advisory signal filtering and processing gate.
 - Prefers Dependabot PR reuse, then calls Fix -> Test -> Validation fallback sequence.
-- Opens PR and dispatches notification.
+- Applies duplicate suppression, merge policy (auto-merge vs manual), and dispatches notification.
 
 ## Delivery Phases
 1. Project bootstrap (TypeScript, lint, tests, docs).
@@ -43,6 +46,7 @@ Automate the flow from open Dependabot alerts (and optional advisory signal targ
 7. Dependabot PR reuse fallback strategy.
 8. CI alert-dispatch automation with advisory payload requirement.
 9. Operational runbook and rollout docs.
+10. Runtime-aware execution, breaking-upgrade classification, and merge-policy hardening.
 
 ## Definition of Done
 - `npm run check` passes.
@@ -50,5 +54,7 @@ Automate the flow from open Dependabot alerts (and optional advisory signal targ
 - Workflow dispatch requires advisory email input.
 - Agent sends email only when there are actionable outcomes or newly seen alerts.
 - Agent suppresses repeated non-actionable skip-only notification noise.
-- Email notification includes PR URL and immediate merge command.
+- Agent suppresses duplicate unchanged alert sets per repository.
+- Email notification clearly distinguishes auto-merged vs manual-review-required outcomes.
+- Breaking upgrade scenarios are explicitly classified and surfaced with recommendations.
 - Templates/documentation contain placeholders only (no personal identifiers).

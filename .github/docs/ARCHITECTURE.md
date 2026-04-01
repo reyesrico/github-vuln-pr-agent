@@ -23,22 +23,26 @@
 - `src/agents/validationAgent.ts`: Final readiness checks.
 - `src/notify/emailNotifier.ts`: SMTP summary notification.
 - `src/agents/orchestrator.ts`: Main control flow.
+- `src/utils/nodeRuntime.ts`: Per-repo Node runtime resolution and command wrapping.
 
 ## Safety
 - Supports `DRY_RUN=true` for non-destructive trial runs.
 - Limits alerts processed per repo.
-- Skips alerts without available patched version.
 - Uses temporary clone directory.
 - Workflow enforces alert-driven signal processing (`PROCESS_ONLY_EMAIL_SIGNAL=true`).
 - Repeated non-actionable runs do not send emails when no new alerts are detected.
+- Duplicate alert-set processing is suppressed per repository to avoid repeated PR churn.
 
 ## Operational Model
 1. Trigger via `workflow_dispatch` or `repository_dispatch` with advisory payload.
 2. Resolve target repositories from explicit list, advisory email, listener signal payload, or account auto-discovery.
 3. If advisory signal is missing: fail fast and stop processing.
 4. Fetch open Dependabot alerts and filter by severity + advisory signal.
-5. For each repository: reuse matching open Dependabot PR when possible, otherwise run batched local fix flow (one PR per repo).
-6. Send summary email with created/skipped/failed status and merge-ready PR links.
+5. For each repository: suppress duplicate unchanged alert sets, then reuse matching open Dependabot PR when possible.
+6. If no reusable PR exists: run batched local fix flow (one PR per repo) with per-repo runtime-aware commands.
+7. If fix requires force/breaking upgrade: classify as `breaking-upgrade`, keep PR for manual review, and include recommendations.
+8. If fix is low-risk/simple dependency-only change: auto-merge PR after successful checks.
+9. Send summary email with auto-merged/manual-review/skipped/failed status and clear suggested actions.
 
 ## Flow Diagram
 ```mermaid
@@ -62,8 +66,24 @@ flowchart TD
 ### Flow Notes
 1. Flow starts only when a fresh advisory signal payload is present.
 2. "Ready to Review and Merge" means the PR passed orchestration checks or a reusable Dependabot PR was found.
-3. Email includes created PR links plus skipped/failed details and suggested actions.
-4. Repeated non-actionable skip-only runs are suppressed from email notifications.
+3. Some successful PRs are auto-merged when they meet low-risk criteria.
+4. Email includes created/auto-merged PR status plus skipped/failed details and suggested actions.
+5. Breaking-upgrade outcomes are called out explicitly with manual recommendation guidance.
+6. Repeated non-actionable skip-only runs are suppressed from email notifications.
+
+## Runtime and Merge Policy
+- Runtime resolution order:
+	- `REPO_COMMANDS[repo].nodeVersion` explicit override.
+	- Repository `engines.node` major version from `package.json`.
+	- Fallback to default runtime.
+- Auto-merge eligibility:
+	- Dependency-only changes.
+	- No risky/manual flags from validation and classification.
+	- Successful validation/test phase.
+- Manual PR required when:
+	- Breaking/force upgrades are needed.
+	- Validation marks change as risky.
+	- Fix output indicates major compatibility risk.
 
 ## Sequence Diagram
 ```mermaid
