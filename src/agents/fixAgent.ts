@@ -235,10 +235,10 @@ export function createOverrideConflictFallbackCommand(command: string): string |
 }
 
 export class FixAgent {
-  private async runAuditFixWithFallbacks(
+  private async tryAuditFixWithFallbacks(
     installWorkingDirectory: string,
     strategy: FixStrategy
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const auditCommand = "npm audit fix --package-lock-only";
     let auditResult = await runCommand(auditCommand, installWorkingDirectory);
     let legacyAttemptOutput: string | undefined;
@@ -256,13 +256,13 @@ export class FixAgent {
 
     if (!auditResult.success) {
       if (legacyAttemptOutput) {
-        throw new Error(
-          `Audit fix failed after retry in ${installWorkingDirectory}: ${auditResult.output}\nRetry (${withLegacyPeerDeps(auditCommand)}) failed: ${legacyAttemptOutput}`
-        );
+        return `Audit fix failed after retry in ${installWorkingDirectory}: ${auditResult.output}\nRetry (${withLegacyPeerDeps(auditCommand)}) failed: ${legacyAttemptOutput}`;
       }
 
-      throw new Error(`Audit fix failed in ${installWorkingDirectory}: ${auditResult.output}`);
+      return `Audit fix failed in ${installWorkingDirectory}: ${auditResult.output}`;
     }
+
+    return undefined;
   }
 
   private async collectChangedFiles(repoDir: string): Promise<string[]> {
@@ -421,10 +421,15 @@ export class FixAgent {
       );
     }
 
+    const auditFallbackErrors: string[] = [];
+
     if (alertsWithoutPatchedVersion.length > 0) {
       const auditDirs = uniqueInstallWorkingDirectories(repoDir, alertsWithoutPatchedVersion);
       for (const installWorkingDirectory of auditDirs) {
-        await this.runAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+        if (error) {
+          auditFallbackErrors.push(error);
+        }
       }
     }
 
@@ -432,7 +437,10 @@ export class FixAgent {
     if (changedFiles.length === 0) {
       const allAuditDirs = uniqueInstallWorkingDirectories(repoDir, input.alerts);
       for (const installWorkingDirectory of allAuditDirs) {
-        await this.runAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+        if (error) {
+          auditFallbackErrors.push(error);
+        }
       }
 
       changedFiles = await this.collectChangedFiles(repoDir);
@@ -446,7 +454,10 @@ export class FixAgent {
         localPath: repoDir,
         commitMessage: "",
         skipped: true,
-        reason: "No file changes after dependency updates and npm audit fix fallback"
+        reason:
+          auditFallbackErrors.length > 0
+            ? `No file changes after dependency updates and npm audit fix fallback; ${auditFallbackErrors[0]}`
+            : "No file changes after dependency updates and npm audit fix fallback"
       };
     }
 
