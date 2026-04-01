@@ -1,6 +1,7 @@
 import { createGithubClient } from "../github/client.js";
 import {
   createSecurityPullRequest,
+  findOpenSecurityAgentPullRequest,
   findReusableDependabotPullRequest,
   findOpenPullRequestByHead,
   getDefaultBranch,
@@ -20,6 +21,11 @@ import { ValidationAgent } from "./validationAgent.js";
 function buildAlertNotificationKey(result: ProcessedAlertResult): string {
   const advisory = result.alert.cveId ?? result.alert.ghsaId;
   return `${result.repoFullName}|${result.alert.dependencyName}|${advisory}`;
+}
+
+function buildAlertKeyFromAlert(repoFullName: string, alert: DependabotAlert): string {
+  const advisory = alert.cveId ?? alert.ghsaId;
+  return `${repoFullName}|${alert.dependencyName}|${advisory}`;
 }
 
 function createPullRequestBody(
@@ -95,6 +101,40 @@ export class Orchestrator {
 
       if (alerts.length === 0) {
         logInfo("No matching alerts", { repoFullName });
+        continue;
+      }
+
+      let notifiedAlertKeysForRepo = new Set<string>();
+      try {
+        notifiedAlertKeysForRepo = await readNotifiedAlertKeys(client, repoFullName);
+      } catch {
+        notifiedAlertKeysForRepo = new Set<string>();
+      }
+
+      const currentRepoAlertKeys = alerts.map((alert) => buildAlertKeyFromAlert(repoFullName, alert));
+      const hasNewAlertForRepo = currentRepoAlertKeys.some((key) => !notifiedAlertKeysForRepo.has(key));
+
+      if (!hasNewAlertForRepo) {
+        const existingSecurityPr = await findOpenSecurityAgentPullRequest(client, repoFullName);
+        const duplicateDetails = existingSecurityPr
+          ? `Existing PR detected: ${existingSecurityPr.pullUrl}`
+          : "Alert set already processed for this repository; waiting for Dependabot state refresh";
+
+        for (const alert of alerts) {
+          const duplicateResult: ProcessedAlertResult = {
+            repoFullName,
+            alert,
+            status: "skipped",
+            details: duplicateDetails
+          };
+
+          if (existingSecurityPr) {
+            duplicateResult.pullRequest = existingSecurityPr;
+          }
+
+          results.push(duplicateResult);
+        }
+
         continue;
       }
 
@@ -249,26 +289,36 @@ export class Orchestrator {
       return results;
     }
 
-    const runtimeRepository = process.env.GITHUB_REPOSITORY?.trim();
     const currentAlertKeys = new Set(results.map((result) => buildAlertNotificationKey(result)));
     const hasActionableOutcome = results.some(
       (result) => result.status === "created" || result.status === "failed"
     );
 
     let shouldSendEmail = true;
-    let notifiedAlertKeys = new Set<string>();
+    const notifiedAlertKeys = new Set<string>();
 
-    if (runtimeRepository) {
-      notifiedAlertKeys = await readNotifiedAlertKeys(client, runtimeRepository);
-      const newAlertDetected = [...currentAlertKeys].some((key) => !notifiedAlertKeys.has(key));
-      shouldSendEmail = hasActionableOutcome || newAlertDetected;
-
-      if (!shouldSendEmail) {
-        logInfo("Skipping email notification: no new alerts and no actionable outcomes", {
-          runtimeRepository,
-          alertsProcessed: results.length
+    for (const repoFullName of repositories) {
+      try {
+        const keys = await readNotifiedAlertKeys(client, repoFullName);
+        for (const key of keys) {
+          notifiedAlertKeys.add(key);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown read error";
+        logWarn("Unable to read notified alert keys for repository", {
+          repoFullName,
+          message
         });
       }
+    }
+
+    const newAlertDetected = [...currentAlertKeys].some((key) => !notifiedAlertKeys.has(key));
+    shouldSendEmail = hasActionableOutcome || newAlertDetected;
+
+    if (!shouldSendEmail) {
+      logInfo("Skipping email notification: no new alerts and no actionable outcomes", {
+        alertsProcessed: results.length
+      });
     }
 
     if (!shouldSendEmail) {
@@ -278,9 +328,26 @@ export class Orchestrator {
     try {
       await sendEmailNotification(config.email, results);
 
-      if (runtimeRepository) {
-        const mergedKeys = new Set([...notifiedAlertKeys, ...currentAlertKeys]);
-        await writeNotifiedAlertKeys(client, runtimeRepository, mergedKeys);
+      const repoToResults = new Map<string, ProcessedAlertResult[]>();
+      for (const result of results) {
+        const current = repoToResults.get(result.repoFullName) ?? [];
+        current.push(result);
+        repoToResults.set(result.repoFullName, current);
+      }
+
+      for (const [repoFullName, repoResults] of repoToResults.entries()) {
+        try {
+          const existingKeys = await readNotifiedAlertKeys(client, repoFullName);
+          const repoKeys = repoResults.map((result) => buildAlertNotificationKey(result));
+          const mergedKeys = new Set([...existingKeys, ...repoKeys]);
+          await writeNotifiedAlertKeys(client, repoFullName, mergedKeys);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown write error";
+          logWarn("Unable to persist notified alert keys for repository", {
+            repoFullName,
+            message
+          });
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown email error";

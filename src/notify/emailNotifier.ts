@@ -39,6 +39,18 @@ function determineSuggestedAction(summary: RepoEmailSummary): string {
   }
 
   if (summary.status === "skipped") {
+    if (
+      detailsText.includes("npm audit fix --force") ||
+      detailsText.includes("breaking change") ||
+      detailsText.includes("will install webpack@")
+    ) {
+      return "Breaking upgrade required. Recommendation: review impact, run upgrade in a feature branch, validate app/tests, then merge with a planned release window.";
+    }
+
+    if (detailsText.includes("no fix available")) {
+      return "No safe upstream patch is available. Recommendation: monitor advisory, reduce exposure, and plan dependency migration/replacement.";
+    }
+
     if (detailsText.includes("no patched version provided")) {
       return "Wait for an upstream patched release or manually review/dismiss the alert.";
     }

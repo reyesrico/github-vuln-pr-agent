@@ -218,6 +218,32 @@ export async function findReusableDependabotPullRequest(
   };
 }
 
+export async function findOpenSecurityAgentPullRequest(
+  client: Octokit,
+  repoFullName: string
+): Promise<PullRequestResult | undefined> {
+  const { owner, repo } = splitRepoFullName(repoFullName);
+
+  const response = await client.rest.pulls.list({
+    owner,
+    repo,
+    state: "open",
+    per_page: 100
+  });
+
+  const match = response.data.find((pr) => pr.title.toLowerCase().startsWith("fix(security): apply "));
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    repoFullName,
+    pullNumber: match.number,
+    pullUrl: match.html_url,
+    title: match.title
+  };
+}
+
 export async function getDefaultBranch(
   client: Octokit,
   repoFullName: string
