@@ -106,21 +106,7 @@ export class Orchestrator {
         });
       }
 
-      const skippedAlerts = alerts.filter((alert) => !alert.patchedVersion);
-      const actionableAlerts = alerts.filter((alert) => Boolean(alert.patchedVersion));
-
-      for (const alert of skippedAlerts) {
-        results.push({
-          repoFullName,
-          alert,
-          status: "skipped",
-          details: "No patched version provided by Dependabot alert"
-        });
-      }
-
-      if (actionableAlerts.length === 0) {
-        continue;
-      }
+      const actionableAlerts = alerts;
 
       if (!config.dryRun) {
         const reusableDependabotPr = await findReusableDependabotPullRequest(

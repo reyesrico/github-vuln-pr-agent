@@ -88,6 +88,10 @@ function appendFlag(command: string, flag: string): string {
   return `${command} ${flag}`;
 }
 
+function uniqueInstallWorkingDirectories(repoDir: string, alerts: DependabotAlert[]): string[] {
+  return [...new Set(alerts.map((alert) => resolveInstallWorkingDirectory(repoDir, alert.manifestPath)))];
+}
+
 async function alignOverrideInPackageJson(
   installWorkingDirectory: string,
   dependencyName: string,
@@ -231,6 +235,45 @@ export function createOverrideConflictFallbackCommand(command: string): string |
 }
 
 export class FixAgent {
+  private async runAuditFixWithFallbacks(
+    installWorkingDirectory: string,
+    strategy: FixStrategy
+  ): Promise<void> {
+    const auditCommand = "npm audit fix --package-lock-only";
+    let auditResult = await runCommand(auditCommand, installWorkingDirectory);
+    let legacyAttemptOutput: string | undefined;
+
+    if (!auditResult.success && strategy.retryWithLegacyPeerDeps) {
+      const retryCommand = withLegacyPeerDeps(auditCommand);
+      const retryResult = await runCommand(retryCommand, installWorkingDirectory);
+
+      if (retryResult.success) {
+        auditResult = retryResult;
+      } else {
+        legacyAttemptOutput = retryResult.output;
+      }
+    }
+
+    if (!auditResult.success) {
+      if (legacyAttemptOutput) {
+        throw new Error(
+          `Audit fix failed after retry in ${installWorkingDirectory}: ${auditResult.output}\nRetry (${withLegacyPeerDeps(auditCommand)}) failed: ${legacyAttemptOutput}`
+        );
+      }
+
+      throw new Error(`Audit fix failed in ${installWorkingDirectory}: ${auditResult.output}`);
+    }
+  }
+
+  private async collectChangedFiles(repoDir: string): Promise<string[]> {
+    const status = await runCommand("git status --porcelain", repoDir);
+    if (!status.success) {
+      throw new Error(`Unable to detect file changes: ${status.output}`);
+    }
+
+    return parseChangedFiles(status.output);
+  }
+
   private async applyInstallCommandWithFallbacks(
     installCommand: string,
     installWorkingDirectory: string,
@@ -360,7 +403,10 @@ export class FixAgent {
       throw new Error(`Branch creation failed: ${checkout.output}`);
     }
 
-    for (const alert of input.alerts) {
+    const alertsWithPatchedVersion = input.alerts.filter((alert) => Boolean(alert.patchedVersion));
+    const alertsWithoutPatchedVersion = input.alerts.filter((alert) => !alert.patchedVersion);
+
+    for (const alert of alertsWithPatchedVersion) {
       const installWorkingDirectory = resolveInstallWorkingDirectory(repoDir, alert.manifestPath);
       const installCommand = await this.buildInstallCommand(
         input.commands,
@@ -375,12 +421,23 @@ export class FixAgent {
       );
     }
 
-    const status = await runCommand("git status --porcelain", repoDir);
-    if (!status.success) {
-      throw new Error(`Unable to detect file changes: ${status.output}`);
+    if (alertsWithoutPatchedVersion.length > 0) {
+      const auditDirs = uniqueInstallWorkingDirectories(repoDir, alertsWithoutPatchedVersion);
+      for (const installWorkingDirectory of auditDirs) {
+        await this.runAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+      }
     }
 
-    const changedFiles = parseChangedFiles(status.output);
+    let changedFiles = await this.collectChangedFiles(repoDir);
+    if (changedFiles.length === 0) {
+      const allAuditDirs = uniqueInstallWorkingDirectories(repoDir, input.alerts);
+      for (const installWorkingDirectory of allAuditDirs) {
+        await this.runAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+      }
+
+      changedFiles = await this.collectChangedFiles(repoDir);
+    }
+
     if (changedFiles.length === 0) {
       return {
         repoFullName: input.repoFullName,
@@ -389,7 +446,7 @@ export class FixAgent {
         localPath: repoDir,
         commitMessage: "",
         skipped: true,
-        reason: "No file changes after dependency updates"
+        reason: "No file changes after dependency updates and npm audit fix fallback"
       };
     }
 
