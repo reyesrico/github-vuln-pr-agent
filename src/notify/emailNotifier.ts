@@ -23,10 +23,57 @@ interface RepoEmailSummary {
   details: string[];
 }
 
+function summarizeDetail(detail: string): string {
+  const normalized = detail.replace(/\s+/g, " ").trim();
+
+  if (!normalized.toLowerCase().includes("npm audit")) {
+    return normalized.length > 420 ? `${normalized.slice(0, 417)}...` : normalized;
+  }
+
+  const highlights: string[] = [];
+
+  const vulnerabilitySummary = normalized.match(/\d+ vulnerabilities? \([^)]+\)/i)?.[0];
+  if (vulnerabilitySummary) {
+    highlights.push(vulnerabilitySummary);
+  }
+
+  const noFixAvailable = normalized.match(/No fix available/i)?.[0];
+  if (noFixAvailable) {
+    highlights.push("No fix available for at least one dependency in this chain");
+  }
+
+  const breakingInstall = normalized.match(/Will install ([^,.;]+), which is a breaking change/i);
+  if (breakingInstall?.[1]) {
+    highlights.push(`Breaking upgrade candidate: ${breakingInstall[1]}`);
+  }
+
+  if (normalized.includes("npm audit fix --force")) {
+    highlights.push("Only force remediation path available (npm audit fix --force)");
+  }
+
+  if (normalized.includes("Command failed: npm audit fix --package-lock-only")) {
+    highlights.push("Non-breaking audit fix attempt did not resolve vulnerabilities");
+  }
+
+  if (highlights.length > 0) {
+    return highlights.join(" | ");
+  }
+
+  return normalized.length > 420 ? `${normalized.slice(0, 417)}...` : normalized;
+}
+
 function determineSuggestedAction(summary: RepoEmailSummary): string {
   const detailsText = summary.details.join(" ").toLowerCase();
 
   if (summary.status === "created") {
+    if (detailsText.includes("auto-merged")) {
+      return "Auto-merged by the agent (low-risk dependency-only change). Verify post-merge checks if desired.";
+    }
+
+    if (detailsText.includes("manual review required")) {
+      return "Manual review required before merge due to broader change scope.";
+    }
+
     if (detailsText.includes("reused dependabot pr")) {
       return "Review and merge the listed Dependabot PR.";
     }
@@ -63,7 +110,15 @@ function determineSuggestedAction(summary: RepoEmailSummary): string {
       return "Review and merge the existing PR.";
     }
 
+    if (detailsText.includes("alert set already processed")) {
+      return "No new action required now. Wait for new alerts or alert-state refresh.";
+    }
+
     return "Review details and rerun when repository state changes.";
+  }
+
+  if (summary.failureCategory === "breaking-upgrade") {
+    return "Breaking upgrade required. Recommendation: create a dedicated upgrade branch, validate with full CI/smoke checks, then merge in a planned release window.";
   }
 
   if (summary.failureCategory === "install") {
@@ -106,7 +161,7 @@ function summarizeByRepository(results: ProcessedAlertResult[]): RepoEmailSummar
       return `${result.alert.dependencyName} (${advisory})`;
     });
 
-    const details = [...new Set(repoResults.map((result) => result.details))];
+    const details = [...new Set(repoResults.map((result) => summarizeDetail(result.details)))];
 
     const summary: RepoEmailSummary = {
       repoFullName,

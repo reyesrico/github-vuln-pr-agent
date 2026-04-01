@@ -166,6 +166,21 @@ export async function createSecurityPullRequest(
   };
 }
 
+export async function mergeSecurityPullRequest(
+  client: Octokit,
+  repoFullName: string,
+  pullNumber: number
+): Promise<void> {
+  const { owner, repo } = splitRepoFullName(repoFullName);
+
+  await client.rest.pulls.merge({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    merge_method: "squash"
+  });
+}
+
 export async function findReusableDependabotPullRequest(
   client: Octokit,
   repoFullName: string,

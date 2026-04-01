@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { runCommand } from "../utils/exec.js";
 import type { BatchFixInput, DependabotAlert, FixInput, FixResult, RepoCommands, FixStrategy } from "../types.js";
+import { resolveNodeRuntime, type NodeRuntime, wrapCommandWithNodeRuntime } from "../utils/nodeRuntime.js";
 
 function sanitizeBranchSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]/g, "-");
@@ -237,15 +238,22 @@ export function createOverrideConflictFallbackCommand(command: string): string |
 export class FixAgent {
   private async tryAuditFixWithFallbacks(
     installWorkingDirectory: string,
-    strategy: FixStrategy
+    strategy: FixStrategy,
+    runtime: NodeRuntime
   ): Promise<string | undefined> {
     const auditCommand = "npm audit fix --package-lock-only";
-    let auditResult = await runCommand(auditCommand, installWorkingDirectory);
+    let auditResult = await runCommand(
+      wrapCommandWithNodeRuntime(auditCommand, runtime),
+      installWorkingDirectory
+    );
     let legacyAttemptOutput: string | undefined;
 
     if (!auditResult.success && strategy.retryWithLegacyPeerDeps) {
       const retryCommand = withLegacyPeerDeps(auditCommand);
-      const retryResult = await runCommand(retryCommand, installWorkingDirectory);
+      const retryResult = await runCommand(
+        wrapCommandWithNodeRuntime(retryCommand, runtime),
+        installWorkingDirectory
+      );
 
       if (retryResult.success) {
         auditResult = retryResult;
@@ -278,15 +286,22 @@ export class FixAgent {
     installCommand: string,
     installWorkingDirectory: string,
     alert: DependabotAlert,
-    strategy: FixStrategy
+    strategy: FixStrategy,
+    runtime: NodeRuntime
   ): Promise<void> {
-    let installResult = await runCommand(installCommand, installWorkingDirectory);
+    let installResult = await runCommand(
+      wrapCommandWithNodeRuntime(installCommand, runtime),
+      installWorkingDirectory
+    );
     let legacyAttemptOutput: string | undefined;
 
     if (!installResult.success && strategy.retryWithLegacyPeerDeps) {
       if (canRetryWithLegacyPeerDeps(installCommand)) {
         const retryCommand = withLegacyPeerDeps(installCommand);
-        const retryResult = await runCommand(retryCommand, installWorkingDirectory);
+        const retryResult = await runCommand(
+          wrapCommandWithNodeRuntime(retryCommand, runtime),
+          installWorkingDirectory
+        );
 
         if (retryResult.success) {
           installResult = retryResult;
@@ -299,13 +314,19 @@ export class FixAgent {
     if (!installResult.success && isNpmOverrideConflict(installResult.output)) {
       const fallbackCommand = createOverrideConflictFallbackCommand(installCommand);
       if (fallbackCommand) {
-        const fallbackResult = await runCommand(fallbackCommand, installWorkingDirectory);
+        const fallbackResult = await runCommand(
+          wrapCommandWithNodeRuntime(fallbackCommand, runtime),
+          installWorkingDirectory
+        );
 
         if (fallbackResult.success) {
           installResult = fallbackResult;
         } else if (strategy.retryWithLegacyPeerDeps && canRetryWithLegacyPeerDeps(fallbackCommand)) {
           const retryFallbackCommand = withLegacyPeerDeps(fallbackCommand);
-          const retryFallbackResult = await runCommand(retryFallbackCommand, installWorkingDirectory);
+          const retryFallbackResult = await runCommand(
+            wrapCommandWithNodeRuntime(retryFallbackCommand, runtime),
+            installWorkingDirectory
+          );
 
           if (retryFallbackResult.success) {
             installResult = retryFallbackResult;
@@ -323,7 +344,10 @@ export class FixAgent {
             );
 
             if (alignOverrideResult.success) {
-              const postAlignRetry = await runCommand(retryFallbackCommand, installWorkingDirectory);
+              const postAlignRetry = await runCommand(
+                wrapCommandWithNodeRuntime(retryFallbackCommand, runtime),
+                installWorkingDirectory
+              );
               if (postAlignRetry.success) {
                 installResult = postAlignRetry;
               } else {
@@ -403,6 +427,8 @@ export class FixAgent {
       throw new Error(`Branch creation failed: ${checkout.output}`);
     }
 
+    const runtime = await resolveNodeRuntime(repoDir, input.commands.nodeVersion);
+
     const alertsWithPatchedVersion = input.alerts.filter((alert) => Boolean(alert.patchedVersion));
     const alertsWithoutPatchedVersion = input.alerts.filter((alert) => !alert.patchedVersion);
 
@@ -417,7 +443,8 @@ export class FixAgent {
         installCommand,
         installWorkingDirectory,
         alert,
-        input.strategy
+        input.strategy,
+        runtime
       );
     }
 
@@ -426,7 +453,7 @@ export class FixAgent {
     if (alertsWithoutPatchedVersion.length > 0) {
       const auditDirs = uniqueInstallWorkingDirectories(repoDir, alertsWithoutPatchedVersion);
       for (const installWorkingDirectory of auditDirs) {
-        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, runtime);
         if (error) {
           auditFallbackErrors.push(error);
         }
@@ -437,7 +464,7 @@ export class FixAgent {
     if (changedFiles.length === 0) {
       const allAuditDirs = uniqueInstallWorkingDirectories(repoDir, input.alerts);
       for (const installWorkingDirectory of allAuditDirs) {
-        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy);
+        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, runtime);
         if (error) {
           auditFallbackErrors.push(error);
         }

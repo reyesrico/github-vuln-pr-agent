@@ -3,6 +3,15 @@ import type { FailureCategory } from "../types.js";
 export function classifyFailure(message: string): FailureCategory {
   const normalized = message.toLowerCase();
 
+  if (
+    normalized.includes("npm audit fix --force") ||
+    normalized.includes("breaking change") ||
+    normalized.includes("will install webpack@") ||
+    normalized.includes("will install react-scripts@")
+  ) {
+    return "breaking-upgrade";
+  }
+
   if (normalized.includes("clone failed")) {
     return "clone";
   }

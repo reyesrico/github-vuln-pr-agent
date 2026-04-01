@@ -13,6 +13,14 @@ describe("classifyFailure", () => {
     );
   });
 
+  it("classifies force upgrade requirements as breaking-upgrade", () => {
+    expect(
+      classifyFailure(
+        "Command failed: npm audit fix --package-lock-only. fix available via `npm audit fix --force` Will install webpack@5.105.4, which is a breaking change"
+      )
+    ).toBe("breaking-upgrade");
+  });
+
   it("classifies test failures", () => {
     expect(classifyFailure("Test failed: npm run test exited 1")).toBe("test");
   });

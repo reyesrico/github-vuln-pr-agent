@@ -6,12 +6,13 @@ import {
   findOpenPullRequestByHead,
   getDefaultBranch,
   listAccountRepositories,
-  listOpenDependabotAlerts
+  listOpenDependabotAlerts,
+  mergeSecurityPullRequest
 } from "../github/dependabot.js";
 import { readNotifiedAlertKeys, writeNotifiedAlertKeys } from "../github/notificationState.js";
 import { sendEmailNotification } from "../notify/emailNotifier.js";
 import type { AppConfig } from "../config.js";
-import type { DependabotAlert, ProcessedAlertResult } from "../types.js";
+import type { DependabotAlert, FixResult, ProcessedAlertResult, TestResult } from "../types.js";
 import { classifyFailure } from "../utils/failureClassification.js";
 import { logError, logInfo, logWarn } from "../utils/logger.js";
 import { FixAgent } from "./fixAgent.js";
@@ -59,6 +60,22 @@ function createPullRequestBody(
     "## Quick Merge",
     `Run: gh pr merge ${prUrlPlaceholder} --auto --squash`
   ].join("\n");
+}
+
+function isSimpleAutoMergeCandidate(fixResult: FixResult, testResult: TestResult): boolean {
+  if (!testResult.success) {
+    return false;
+  }
+
+  if (fixResult.changedFiles.length === 0 || fixResult.changedFiles.length > 3) {
+    return false;
+  }
+
+  return fixResult.changedFiles.every((file) =>
+    ["package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json"].some(
+      (allowed) => file.endsWith(allowed)
+    )
+  );
 }
 
 export class Orchestrator {
@@ -260,12 +277,32 @@ export class Orchestrator {
           defaultBranch
         );
 
+        let details = `PR created: ${pullRequest.pullUrl}`;
+
+        if (isSimpleAutoMergeCandidate(fixResult, testResult)) {
+          try {
+            await mergeSecurityPullRequest(client, repoFullName, pullRequest.pullNumber);
+            pullRequest.autoMerged = true;
+            details = `PR auto-merged (simple dependency-only change): ${pullRequest.pullUrl}`;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown auto-merge error";
+            logWarn("Auto-merge skipped after PR creation", {
+              repoFullName,
+              pullRequest: pullRequest.pullUrl,
+              message
+            });
+            details = `PR created (auto-merge failed): ${pullRequest.pullUrl}`;
+          }
+        } else {
+          details = `PR created (manual review required): ${pullRequest.pullUrl}`;
+        }
+
         for (const alert of actionableAlerts) {
           results.push({
             repoFullName,
             alert,
             status: "created",
-            details: `PR created: ${pullRequest.pullUrl}`,
+            details,
             pullRequest
           });
         }

@@ -28,6 +28,7 @@ export interface AdvisorySignalPayload {
 }
 
 export interface RepoCommands {
+  nodeVersion?: string;
   install?: string;
   lint?: string;
   test?: string;
@@ -90,10 +91,12 @@ export interface PullRequestResult {
   pullNumber: number;
   pullUrl: string;
   title: string;
+  autoMerged?: boolean;
 }
 
 export type FailureCategory =
   | "clone"
+  | "breaking-upgrade"
   | "install"
   | "test"
   | "validation"

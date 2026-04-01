@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { runCommand } from "../utils/exec.js";
 import type { CommandResult, RepoCommands, TestResult } from "../types.js";
+import { resolveNodeRuntime, wrapCommandWithNodeRuntime } from "../utils/nodeRuntime.js";
 
 async function loadPackageScripts(localPath: string): Promise<Record<string, string>> {
   const packageJsonPath = path.join(localPath, "package.json");
@@ -28,6 +29,7 @@ export class TestAgent {
   async run(repoFullName: string, branchName: string, localPath: string, commands: RepoCommands): Promise<TestResult> {
     const scripts = await loadPackageScripts(localPath);
     const shouldSkipDefaultTest = !commands.test && isPlaceholderTestScript(scripts.test);
+    const runtime = await resolveNodeRuntime(localPath, commands.nodeVersion);
 
     const commandList = [
       commands.lint ?? "npm run lint --if-present",
@@ -37,7 +39,8 @@ export class TestAgent {
     const results: CommandResult[] = [];
 
     for (const command of commandList) {
-      const result = await runCommand(command, localPath);
+      const commandWithRuntime = wrapCommandWithNodeRuntime(command, runtime);
+      const result = await runCommand(commandWithRuntime, localPath);
       results.push({ command, success: result.success, output: result.output });
       if (!result.success) {
         return { repoFullName, branchName, commands: results, success: false };
