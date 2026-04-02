@@ -177,6 +177,96 @@ async function alignOverrideInPackageJson(
   }
 }
 
+function isVersionBelow(version: string, minVersion: string): boolean {
+  const vParts = version.split(".").map(Number);
+  const mParts = minVersion.split(".").map(Number);
+
+  for (let i = 0; i < Math.max(vParts.length, mParts.length); i++) {
+    const v = vParts[i] ?? 0;
+    const m = mParts[i] ?? 0;
+
+    if (v < m) return true;
+    if (v > m) return false;
+  }
+
+  return false;
+}
+
+async function findNestedParentsInLockFile(
+  lockFilePath: string,
+  depName: string,
+  patchedVersion: string
+): Promise<string[]> {
+  try {
+    const raw = await readFile(lockFilePath, "utf8");
+    const lock = JSON.parse(raw) as { packages?: Record<string, { version?: string }> };
+    const packages = lock.packages ?? {};
+    const parents = new Set<string>();
+    const escapedDep = depName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const nestedPattern = new RegExp(`^node_modules/(.+)/node_modules/${escapedDep}$`);
+
+    for (const [key, pkg] of Object.entries(packages)) {
+      const match = nestedPattern.exec(key);
+
+      if (match && pkg.version && isVersionBelow(pkg.version, patchedVersion)) {
+        const parentPath = match[1];
+
+        if (parentPath) {
+          const parentName = parentPath.split("/node_modules/").pop();
+
+          if (parentName) {
+            parents.add(parentName);
+          }
+        }
+      }
+    }
+
+    return [...parents];
+  } catch {
+    return [];
+  }
+}
+
+async function addScopedDepOverrides(
+  packageJsonPath: string,
+  parentNames: string[],
+  depName: string,
+  patchedVersion: string
+): Promise<boolean> {
+  try {
+    const raw = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      overrides?: Record<string, string | Record<string, string>>;
+    };
+
+    parsed.overrides = parsed.overrides ?? {};
+    let modified = false;
+    const versionSpec = `>=${patchedVersion}`;
+
+    for (const parent of parentNames) {
+      const existing = parsed.overrides[parent];
+
+      if (existing !== null && typeof existing === "object") {
+        if (existing[depName] !== versionSpec) {
+          existing[depName] = versionSpec;
+          modified = true;
+        }
+      } else {
+        parsed.overrides[parent] = { [depName]: versionSpec };
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    }
+
+    return modified;
+  } catch {
+    return false;
+  }
+}
+
 async function getInstallVersionSpec(
   installWorkingDirectory: string,
   dependencyName: string,
@@ -446,6 +536,38 @@ export class FixAgent {
         input.strategy,
         runtime
       );
+    }
+
+    // For each alert with a patched version, check if transitive nested copies remain
+    // in the lock file (e.g. a parent package pins an exact older version). If so, add
+    // scoped npm overrides so the top-level patched version is used everywhere.
+    for (const alert of alertsWithPatchedVersion) {
+      if (!alert.patchedVersion) continue;
+
+      const installWorkingDirectory = resolveInstallWorkingDirectory(repoDir, alert.manifestPath);
+      const lockFilePath = path.join(installWorkingDirectory, "package-lock.json");
+      const nestedParents = await findNestedParentsInLockFile(
+        lockFilePath,
+        alert.dependencyName,
+        alert.patchedVersion
+      );
+
+      if (nestedParents.length > 0) {
+        const packageJsonPath = path.join(installWorkingDirectory, "package.json");
+        const overrideAdded = await addScopedDepOverrides(
+          packageJsonPath,
+          nestedParents,
+          alert.dependencyName,
+          alert.patchedVersion
+        );
+
+        if (overrideAdded) {
+          await runCommand(
+            wrapCommandWithNodeRuntime("npm install --package-lock-only", runtime),
+            installWorkingDirectory
+          );
+        }
+      }
     }
 
     const auditFallbackErrors: string[] = [];

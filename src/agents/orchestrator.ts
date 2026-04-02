@@ -133,26 +133,24 @@ export class Orchestrator {
 
       if (!hasNewAlertForRepo) {
         const existingSecurityPr = await findOpenSecurityAgentPullRequest(client, repoFullName);
-        const duplicateDetails = existingSecurityPr
-          ? `Existing PR detected: ${existingSecurityPr.pullUrl}`
-          : "Alert set already processed for this repository; waiting for Dependabot state refresh";
 
-        for (const alert of alerts) {
-          const duplicateResult: ProcessedAlertResult = {
-            repoFullName,
-            alert,
-            status: "skipped",
-            details: duplicateDetails
-          };
-
-          if (existingSecurityPr) {
-            duplicateResult.pullRequest = existingSecurityPr;
+        if (existingSecurityPr) {
+          for (const alert of alerts) {
+            results.push({
+              repoFullName,
+              alert,
+              status: "skipped",
+              details: `Existing PR detected: ${existingSecurityPr.pullUrl}`,
+              pullRequest: existingSecurityPr
+            });
           }
-
-          results.push(duplicateResult);
+          continue;
         }
 
-        continue;
+        // No active PR found for previously-notified alerts — fall through to retry the fix flow
+        logInfo("All current alerts were previously notified but no active PR exists; retrying fix", {
+          repoFullName
+        });
       }
 
       for (const alert of alerts) {
