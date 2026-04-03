@@ -63,5 +63,8 @@ export function wrapCommandWithNodeRuntime(command: string, runtime: NodeRuntime
     return command;
   }
 
-  return `npx -y node@${runtime.major} -c ${shellSingleQuote(command)}`;
+  // Install the requested Node.js major via npx and run the shell command in that
+  // environment. Using --package=node@<N> prepends node@<N>'s bin (node + npm) to
+  // PATH so all npm subcommands run against the right runtime.
+  return `npx --yes --package=node@${runtime.major} -- sh -c ${shellSingleQuote(command)}`;
 }

@@ -35,7 +35,8 @@ describe("nodeRuntime helpers", () => {
       source: "package-engines"
     });
 
-    expect(wrapped).toContain("npx -y node@20 -c");
+    expect(wrapped).toContain("npx --yes --package=node@20");
+    expect(wrapped).toContain("sh -c");
     expect(wrapped).toContain("npm test -- --watchAll=false");
   });
 });
