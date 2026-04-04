@@ -241,7 +241,10 @@ async function addScopedDepOverrides(
 
     parsed.overrides = parsed.overrides ?? {};
     let modified = false;
-    const versionSpec = `>=${patchedVersion}`;
+    // Use caret range to stay within the same major version.
+    // '>=' would resolve to the latest overall (e.g. json5@2.x for >=1.0.2), which
+    // can be a breaking API change for the parent package.
+    const versionSpec = `^${patchedVersion}`;
 
     for (const parent of parentNames) {
       const existing = parsed.overrides[parent];
@@ -562,10 +565,16 @@ export class FixAgent {
         );
 
         if (overrideAdded) {
-          await runCommand(
+          const nestedInstallResult = await runCommand(
             wrapCommandWithNodeRuntime("npm install --package-lock-only", runtime),
             installWorkingDirectory
           );
+          if (!nestedInstallResult.success && input.strategy.retryWithLegacyPeerDeps) {
+            await runCommand(
+              wrapCommandWithNodeRuntime("npm install --package-lock-only --legacy-peer-deps", runtime),
+              installWorkingDirectory
+            );
+          }
         }
       }
     }
