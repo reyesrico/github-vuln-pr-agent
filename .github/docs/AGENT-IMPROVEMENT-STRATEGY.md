@@ -292,6 +292,75 @@ Verify that the variable exists after writing and retry once if the read-back fa
 | `>=X.Y.Z` override breaks dependency | Resolves to incompatible major | Use `^X.Y.Z` to stay in same major |
 | Daily emails for unfixable alert | No suppression for no-patch alerts | Write unfixable keys, suppress after first email |
 
+## 6. Audit-First Fix Strategy (Implemented April 7, 2026)
+
+### Previous approach (replaced)
+
+The agent used a **per-alert surgical install** as the primary strategy:
+```
+for each Dependabot alert:
+  npm install dep@patchedVersion --package-lock-only
+```
+
+This caused persistent issues:
+- Missed transitive nested copies (required scoped override patches)
+- Used wrong version specifiers (`>=` instead of `^`)
+- Threw on first failing alert → aborted the entire batch
+- Missed vulnerabilities not covered by a Dependabot alert (audit-only issues)
+
+### New approach
+
+```
+Phase 1: npm audit fix --package-lock-only  (all manifest dirs, primary)
+Phase 2: Scoped overrides for nested transitive copies still unresolved
+Phase 3: Node version upgrade if EBADENGINE detected → retry audit fix
+```
+
+**Why audit-first is better:**
+- `npm audit fix` uses npm's own advisory graph to select safe version ranges — more reliable than pinning `patchedVersion` from Dependabot
+- Fixes ALL vulnerabilities in one pass, not just the ones Dependabot reported
+- No per-alert throw cascade — audit errors are collected and reported, not fatal
+- Naturally handles the `alertsWithoutPatchedVersion` case (previously a separate code path)
+- Aligns with what a developer would run manually
+
+**Phase 2 (scoped overrides) still needed for:**
+- Parent packages that pin an exact older version of a transitive dep (e.g. `jsonpath@1.3.0` pins `underscore@1.13.6`). `npm audit fix` leaves these untouched because the nested copy satisfies the parent's original constraint. The fix: write `overrides.parent.dep = "^patchedVersion"`, delete the stale lock entry, re-run `npm install --package-lock-only`.
+
+**Phase 3 (node version upgrade):**
+- Detects `EBADENGINE` or "requires node >= X" in audit output
+- Bumps `engines.node` in `package.json` and updates `.nvmrc`/`.node-version` if present
+- Re-runs audit fix with the updated runtime so packages requiring newer Node can resolve
+
 ---
 
-_Last updated: April 4, 2026_
+## 7. Node Version Detection and Upgrade
+
+### Problem
+
+Some security fixes require a newer Node.js version. Example:  
+- Package `X@vulnerable` → fix is `X@safe` which requires `node>=20`
+- Repo's `package.json` says `engines: {node: ">=16"}`
+- npm refuses to install `X@safe` with `EBADENGINE`
+- Agent marks as failed or skipped
+
+### Solution implemented
+
+`tryNodeVersionUpgrade` → `bumpNodeVersionInManifest`:
+1. Parse audit/install output for `EBADENGINE`, "requires node >= X", "engine.*node.*>= N"
+2. Extract minimum required major version
+3. If repo's current `engines.node` major < required: bump to `>=requiredMajor`
+4. Update `.nvmrc` / `.node-version` to the new major if those files exist
+5. Re-resolve runtime (`resolveNodeRuntime` reads the updated `engines.node`) and re-run audit fix
+
+### What this means for the PR
+
+When a node version bump is needed, the PR will include changes to:
+- `package.json` (`engines.node` field)
+- `package-lock.json` (updated resolutions)
+- `.nvmrc` or `.node-version` (if present)
+
+**Important caveat**: bumping `engines.node` changes the minimum runtime requirement for the repo. The test agent runs `npm test` before creating the PR, which will catch regressions. If tests fail, the PR is not created and the email reports `test` as the failure category. This is the correct behavior — a node version bump that breaks tests needs manual intervention.
+
+---
+
+_Last updated: April 7, 2026_

@@ -311,6 +311,48 @@ async function deleteNestedLockEntries(
   }
 }
 
+function parseMinRequiredNodeMajor(output: string): number | undefined {
+  const patterns = [
+    /EBADENGINE[^\n]*required[^\n]*node@?>=?(\d+)/i,
+    /requires? node@?>=?(\d+)/i,
+    /engine.*node.*>=\s*(\d+)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(output);
+    const major = match?.[1];
+    if (major) {
+      return Number(major);
+    }
+  }
+
+  return undefined;
+}
+
+async function bumpNodeVersionInManifest(
+  packageJsonPath: string,
+  requiredMajor: number
+): Promise<boolean> {
+  try {
+    const raw = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as { engines?: { node?: string } };
+    const currentSpec = parsed.engines?.node ?? "";
+    const currentMajorMatch = /(\d+)/.exec(currentSpec);
+    const currentMajor = currentMajorMatch ? Number(currentMajorMatch[1]) : 0;
+
+    if (currentMajor >= requiredMajor) {
+      return false;
+    }
+
+    parsed.engines = parsed.engines ?? {};
+    parsed.engines.node = `>=${requiredMajor}`;
+    await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function getInstallVersionSpec(
   installWorkingDirectory: string,
   dependencyName: string,
@@ -416,6 +458,40 @@ export class FixAgent {
     return parseChangedFiles(status.output);
   }
 
+  private async tryNodeVersionUpgrade(
+    repoDir: string,
+    auditOutput: string
+  ): Promise<boolean> {
+    const requiredMajor = parseMinRequiredNodeMajor(auditOutput);
+    if (!requiredMajor) {
+      return false;
+    }
+
+    const packageJsonPath = path.join(repoDir, "package.json");
+    const bumped = await bumpNodeVersionInManifest(packageJsonPath, requiredMajor);
+
+    if (bumped) {
+      for (const versionFile of [".nvmrc", ".node-version"]) {
+        const filePath = path.join(repoDir, versionFile);
+        try {
+          const current = (await readFile(filePath, "utf8")).trim();
+          const currentMajorMatch = /(\d+)/.exec(current);
+          const currentMajor = currentMajorMatch ? Number(currentMajorMatch[1]) : 0;
+          if (currentMajor < requiredMajor) {
+            await writeFile(filePath, `${requiredMajor}\n`, "utf8");
+          }
+        } catch {
+          // File does not exist; skip.
+        }
+      }
+    }
+
+    return bumped;
+  }
+
+  // NOTE: applyInstallCommandWithFallbacks intentionally removed.
+  // The primary fix strategy is now npm audit fix (see applyFixBatch Phase 1).
+  // Targeted per-alert installs were replaced by audit fix + scoped override supplements.
   private async applyInstallCommandWithFallbacks(
     installCommand: string,
     installWorkingDirectory: string,
@@ -563,28 +639,25 @@ export class FixAgent {
 
     const runtime = await resolveNodeRuntime(repoDir, input.commands.nodeVersion);
 
-    const alertsWithPatchedVersion = input.alerts.filter((alert) => Boolean(alert.patchedVersion));
-    const alertsWithoutPatchedVersion = input.alerts.filter((alert) => !alert.patchedVersion);
+    const allManifestDirs = uniqueInstallWorkingDirectories(repoDir, input.alerts);
+    const auditErrors: string[] = [];
 
-    for (const alert of alertsWithPatchedVersion) {
-      const installWorkingDirectory = resolveInstallWorkingDirectory(repoDir, alert.manifestPath);
-      const installCommand = await this.buildInstallCommand(
-        input.commands,
-        alert,
-        installWorkingDirectory
-      );
-      await this.applyInstallCommandWithFallbacks(
-        installCommand,
-        installWorkingDirectory,
-        alert,
-        input.strategy,
-        runtime
-      );
+    // Phase 1: npm audit fix --package-lock-only (primary strategy).
+    // Resolves all automatically-patchable vulnerabilities in one pass — more reliable
+    // than per-alert installs because npm uses its own advisory graph to select safe
+    // version ranges rather than relying on the exact patchedVersion from Dependabot.
+    for (const installWorkingDirectory of allManifestDirs) {
+      const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, runtime);
+      if (error) {
+        auditErrors.push(error);
+      }
     }
 
-    // For each alert with a patched version, check if transitive nested copies remain
-    // in the lock file (e.g. a parent package pins an exact older version). If so, add
-    // scoped npm overrides so the top-level patched version is used everywhere.
+    // Phase 2: Scoped overrides for transitive nested copies not resolved by audit fix.
+    // Some parent packages pin an exact older version of a dep; npm audit fix leaves
+    // those nested copies untouched. We write a scoped npm override (overrides.parent.dep)
+    // and delete the stale lock entry so npm regenerates it using the patched version.
+    const alertsWithPatchedVersion = input.alerts.filter((alert) => Boolean(alert.patchedVersion));
     for (const alert of alertsWithPatchedVersion) {
       if (!alert.patchedVersion) continue;
 
@@ -606,10 +679,6 @@ export class FixAgent {
         );
 
         if (overrideAdded) {
-          // Directly remove the stale nested lock entry so npm regenerates it
-          // according to the new override. Without this, npm install --package-lock-only
-          // leaves the old entry untouched because it still satisfies the parent's
-          // original (pre-override) pinned requirement.
           await deleteNestedLockEntries(lockFilePath, nestedParents, alert.dependencyName);
 
           const nestedInstallResult = await runCommand(
@@ -626,30 +695,22 @@ export class FixAgent {
       }
     }
 
-    const auditFallbackErrors: string[] = [];
+    // Phase 3: Node version upgrade.
+    // If audit output contains EBADENGINE or "requires node >= X", bump the repo's
+    // engines.node (and .nvmrc/.node-version if present) to the required major, then
+    // re-run audit fix with the updated runtime so packages that needed a newer Node
+    // can now resolve to their patched versions.
+    const combinedAuditOutput = auditErrors.join("\n");
+    const nodeVersionBumped = await this.tryNodeVersionUpgrade(repoDir, combinedAuditOutput);
 
-    if (alertsWithoutPatchedVersion.length > 0) {
-      const auditDirs = uniqueInstallWorkingDirectories(repoDir, alertsWithoutPatchedVersion);
-      for (const installWorkingDirectory of auditDirs) {
-        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, runtime);
-        if (error) {
-          auditFallbackErrors.push(error);
-        }
+    if (nodeVersionBumped) {
+      const updatedRuntime = await resolveNodeRuntime(repoDir, input.commands.nodeVersion);
+      for (const installWorkingDirectory of allManifestDirs) {
+        await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, updatedRuntime);
       }
     }
 
-    let changedFiles = await this.collectChangedFiles(repoDir);
-    if (changedFiles.length === 0) {
-      const allAuditDirs = uniqueInstallWorkingDirectories(repoDir, input.alerts);
-      for (const installWorkingDirectory of allAuditDirs) {
-        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, runtime);
-        if (error) {
-          auditFallbackErrors.push(error);
-        }
-      }
-
-      changedFiles = await this.collectChangedFiles(repoDir);
-    }
+    const changedFiles = await this.collectChangedFiles(repoDir);
 
     if (changedFiles.length === 0) {
       return {
@@ -660,9 +721,9 @@ export class FixAgent {
         commitMessage: "",
         skipped: true,
         reason:
-          auditFallbackErrors.length > 0
-            ? `No file changes after dependency updates and npm audit fix fallback; ${auditFallbackErrors[0]}`
-            : "No file changes after dependency updates and npm audit fix fallback"
+          auditErrors.length > 0
+            ? `No file changes after npm audit fix; ${auditErrors[0]}`
+            : "No file changes after npm audit fix"
       };
     }
 
