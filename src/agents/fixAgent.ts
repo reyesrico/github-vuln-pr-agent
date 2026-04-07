@@ -270,6 +270,47 @@ async function addScopedDepOverrides(
   }
 }
 
+async function deleteNestedLockEntries(
+  lockFilePath: string,
+  parentNames: string[],
+  depName: string
+): Promise<boolean> {
+  try {
+    const raw = await readFile(lockFilePath, "utf8");
+    const lock = JSON.parse(raw) as { packages?: Record<string, unknown> };
+    const packages = lock.packages;
+
+    if (!packages) {
+      return false;
+    }
+
+    let deleted = false;
+    const escapedDep = depName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    for (const parent of parentNames) {
+      const escapedParent = parent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(
+        `^node_modules/(?:.+/node_modules/)?${escapedParent}/node_modules/${escapedDep}$`
+      );
+
+      for (const key of Object.keys(packages)) {
+        if (pattern.test(key)) {
+          delete packages[key];
+          deleted = true;
+        }
+      }
+    }
+
+    if (deleted) {
+      await writeFile(lockFilePath, JSON.stringify(lock, null, 2) + "\n", "utf8");
+    }
+
+    return deleted;
+  } catch {
+    return false;
+  }
+}
+
 async function getInstallVersionSpec(
   installWorkingDirectory: string,
   dependencyName: string,
@@ -565,6 +606,12 @@ export class FixAgent {
         );
 
         if (overrideAdded) {
+          // Directly remove the stale nested lock entry so npm regenerates it
+          // according to the new override. Without this, npm install --package-lock-only
+          // leaves the old entry untouched because it still satisfies the parent's
+          // original (pre-override) pinned requirement.
+          await deleteNestedLockEntries(lockFilePath, nestedParents, alert.dependencyName);
+
           const nestedInstallResult = await runCommand(
             wrapCommandWithNodeRuntime("npm install --package-lock-only", runtime),
             installWorkingDirectory
