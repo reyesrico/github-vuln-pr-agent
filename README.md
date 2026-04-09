@@ -4,13 +4,15 @@ Automates security remediation across repositories by turning GitHub Dependabot 
 
 ## How It Works
 
-When a new Dependabot vulnerability alert is created in any monitored repository:
+The agent runs on a **daily schedule (08:00 UTC)** and sweeps all monitored repositories for open Dependabot alerts:
 
-1. The per-repo listener workflow fires immediately on the `dependabot_alert` event.
-2. It forwards a structured signal payload to the central agent via `repository_dispatch`.
-3. The central agent processes matching alerts, creates a fix branch, runs lint/tests, and opens a PR.
-4. The agent applies merge policy: low-risk dependency-only fixes may auto-merge; risky/breaking fixes are left as manual-review PRs.
+1. The central workflow triggers automatically each morning via `cron: '0 8 * * *'`.
+2. It queries open Dependabot alerts across all monitored repositories, filtered by severity and ecosystem.
+3. For each new alert it creates a fix branch, runs lint/tests, and opens a PR.
+4. The agent applies merge policy: low-risk dependency-only fixes can auto-merge, while risky/breaking fixes are left as manual-review PRs.
 5. You receive a summary email with created, auto-merged, skipped, and failed outcomes plus recommended actions.
+
+> **Note**: Real-time per-repo listener workflows (using the `dependabot_alert` event) are **not used**. That event is not in GitHub's push-time YAML schema validator and causes failure emails on every push to every branch of every target repo. The daily 8am sweep covers all alert detection without the noise.
 
 ## What You Receive
 
@@ -88,9 +90,12 @@ npm run dev
 
 | Trigger | When | Signal mode |
 |---|---|---|
-| `dependabot_alert` listener | Immediately on new alert in target repo | Signal-scoped (one alert) |
+| `schedule` (`cron: '0 8 * * *'`) | Daily at 08:00 UTC | Sweeps all monitored repos |
 | `workflow_dispatch` (manual) | On demand | Signal-scoped when advisory payload is provided |
 | `repository_dispatch` `vulnerability-alert-forwarded` | Integration / custom tooling | Signal-scoped |
+| `repository_dispatch` `advisory-email-received` | Integration / email pipeline | Signal-scoped |
+
+> The `dependabot_alert` event trigger is **not supported**. It is not in GitHub's push-time JSON schema and causes a validation failure email on every push to every branch of every repo where the workflow file exists.
 
 ## Alert Processing Rules
 - Severity filter: `critical`, `high`, `moderate`
@@ -208,10 +213,12 @@ gh api repos/owner/repo/dispatches \
 	-f client_payload='{"advisory_email":"<raw advisory body>"}'
 ```
 
-Listener-based dispatch (recommended for full automation):
-- Add [./.github/templates/repository-vulnerability-listener.yml](.github/templates/repository-vulnerability-listener.yml) to each target repository at `.github/workflows/repository-vulnerability-listener.yml`.
+Listener-based dispatch (optional — for custom integrations only):
+- The per-repo listener template at [./.github/templates/repository-vulnerability-listener.yml](.github/templates/repository-vulnerability-listener.yml) can be used to forward custom signals via `workflow_dispatch`. It does **not** use `dependabot_alert` (see note below).
 - Set target-repo variable `CENTRAL_SECURITY_AGENT_REPO=owner/github-vuln-pr-agent`.
 - Set target-repo secret `CENTRAL_SECURITY_AGENT_DISPATCH_TOKEN` with a token that can dispatch to the central repo.
+
+> **Important**: Do not add a listener workflow that uses `on: dependabot_alert`. That event is not in GitHub's push-time YAML schema validator. The file will be rejected on every push and generate failure emails. The daily `cron` sweep is the recommended detection method.
 
 Automate listener rollout to one target repo:
 
@@ -231,7 +238,7 @@ Automate listener rollout to one target repo:
 - Duplicate unchanged alert sets are suppressed per repository to prevent repeat churn.
 - Skipped alerts usually mean no patched version exists yet or the repo is already up to date.
 - GitHub's own Dependabot emails are separate from agent emails — both may arrive on the same day for the same alert.
-- To add a new repo to the monitored set: `./scripts/install-repo-listener.sh owner/new-repo owner/github-vuln-pr-agent .env`
+- To add a new repo to the monitored set: add `owner/new-repo` to `ALERT_REPOSITORIES` in the central agent's GitHub Actions variables (or use `ACCOUNT_LOGIN` to auto-discover all owned repos). No per-repo workflow file is needed.
 - Use [./.github/docs/GITHUB_ROLLOUT_CHECKLIST.md](.github/docs/GITHUB_ROLLOUT_CHECKLIST.md) for the full GitHub setup and go-live sequence.
 
 ## E2E Recommendation Simulation

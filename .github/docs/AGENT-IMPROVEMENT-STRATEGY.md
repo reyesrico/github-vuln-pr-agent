@@ -7,20 +7,36 @@
 
 ## 1. Infrastructure Failures (Listener / Workflow Layer)
 
-### 1.1 `dependabot_alert.types: [created]` causes push-time schema errors
+### 1.1 `dependabot_alert` in `on:` causes push-time schema failure emails — UNSOLVABLE without deletion
 
-**Symptom**: Every push to any target repo triggers a GitHub workflow validation failure
+**Symptom**: Every push to any target repo triggers a GitHub Actions workflow failure
 (`This run likely failed because of a workflow file issue`) and sends a failure email.
+Zero jobs run. The workflow's `name:` field is ignored — GitHub UI shows the file path instead.
 
-**Root cause**: GitHub's push-time YAML schema validator does not recognise `types` as a valid
-sub-key under `dependabot_alert`. The workflow still runs correctly at runtime; the validator
-fires first and rejects it.
+**Root cause (confirmed April 9, 2026 via live testing)**: GitHub's **push-time YAML schema
+validator** rejects `dependabot_alert` entirely. This event is NOT in the schema at
+`schemastore.org/github-workflow.json`. Every push to every branch triggers the validator.
 
-**Fix applied**: Remove `types: [created]` from the `on.dependabot_alert` trigger. The
-step-level `if: github.event.action == 'created'` conditions handle filtering instead.
+**Attempted fixes that did NOT work**:
+1. ✗ Remove `types: [created]`, keep bare `on: dependabot_alert:` → still fails
+2. ✗ Add all 6 types → still fails
+3. ✗ Add `continue-on-error: true` at job level → no effect (failure is pre-job)
+4. ✗ Add `push:` trigger alongside `dependabot_alert:` → still fails (validator rejects the whole file)
+5. ✗ Add `workflow_dispatch:` alongside `dependabot_alert:` → still fails
+6. ✓ Remove `dependabot_alert:` entirely, keep `workflow_dispatch:` only → no failure run created
 
-**Pattern to remember**: Push-time schema validation is stricter than runtime parsing. Any
-non-standard event sub-key will fail validation even if GitHub supports it at runtime.
+**Why `continue-on-error` doesn't help**: It only affects job-level failures. The validator
+fires before any runner is allocated — the failure run has zero jobs, zero steps.
+
+**Final fix (April 9, 2026)**: Deleted listener YAML files from all 5 target repos.
+The `dependabot_alert` event is permanently incompatible with GitHub's push-validation system
+for users on Free/Pro plans. There is no workaround that keeps the listener and stops the emails.
+
+**Why deletion is safe**: The central agent runs on `schedule: cron: '0 8 * * *'` in
+`reyesrico/github-vuln-pr-agent` and sweeps all repos via the Dependabot alerts API every
+morning at 08:00 UTC. The listener's real-time dispatch was a nice-to-have, not a requirement.
+
+**Full deep-dive**: See `.github/docs/GITHUB-ACTIONS-YAML-REFERENCE.md`.
 
 ---
 
@@ -33,9 +49,8 @@ No jobs were run` every time Dependabot dismisses, reopens, or auto-fixes an ale
 When Dependabot fires non-`created` events, the job condition fails before any steps run →
 GitHub's notification system sees a workflow with zero jobs executed → sends email.
 
-**Fix applied**: Move `if` condition to the **step level**. Add an explicit no-op step for
-non-created events (`echo "Skipping dispatch because event action is '...'"`) so the job always
-completes (exit 0, one step) regardless of event type.
+**Fix applied (then superseded)**: Moved `if` to step level with explicit no-op step.
+Superseded by listener deletion (§1.1).
 
 **Pattern to remember**: At the job level, `if: false` → "No jobs were run" → email. Always
 have at least one unconditional step so the job completes cleanly even when no real work is done.
