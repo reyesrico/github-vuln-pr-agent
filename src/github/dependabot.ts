@@ -4,8 +4,11 @@ import { splitRepoFullName } from "./client.js";
 import type { AlertSignal, DependabotAlert, PullRequestResult, Severity } from "../types.js";
 
 function normalizeSeverity(input: string): Severity {
-  if (input === "critical" || input === "high" || input === "moderate") {
+  if (input === "critical" || input === "high") {
     return input;
+  }
+  if (input === "moderate" || input === "medium") {
+    return "moderate";
   }
   return "low";
 }
