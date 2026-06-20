@@ -172,6 +172,42 @@ major version (json5@1.0.2 for `^1.0.2`), which is safe.
 
 ---
 
+### 2.6 Hoisted transitive deps skipped as "breaking" when only `audit fix --force` works — FIXED
+
+**Symptom**: A batch of alerts (e.g., workshop-app on 2026-06-20: undici ×6,
+http-proxy-middleware ×2, piscina, vite ×2, esbuild, @babel/core — 11 alerts) is reported
+`skipped / breaking-upgrade` with "Only force remediation path available
+(npm audit fix --force)", even though every patched version is a same-major,
+semver-compatible bump.
+
+**Root cause**: The vulnerable packages are hoisted to the **top** of `node_modules`
+(`node_modules/<dep>`, not nested) and pinned transitively by Angular build tooling
+(`@angular/build`, `@angular-devkit/build-angular`). `npm audit fix` won't touch them
+because a parent declares an older range; only `npm audit fix --force` would, which npm
+flags as a breaking SemVer-major change. Phase 2 (§2.3) only handled **nested** copies
+(`node_modules/<parent>/node_modules/<dep>`), so hoisted top-level copies fell through and
+the batch produced no file changes → skipped as `breaking-upgrade`.
+
+**Fix applied (Phase 2b in `fixAgent.applyFixBatch`)**: After Phase 1/2, for each alert with
+a `patchedVersion`, read the installed top-level version from `package-lock.json`. If it is
+still below the patched version, is **not** a direct dependency, and the patched version is
+within the **same numeric major** (`isSameMajorUpgrade`), write a top-level override
+(`overrides.<dep> = "^patchedVersion"`), delete the stale `node_modules/<dep>` lock entry,
+and regenerate the lockfile (`npm install --package-lock-only`, with `--legacy-peer-deps`
+fallback). The downstream lint/test/validation gate then validates the upgrade before a PR is
+created. Cross-major gaps (e.g., uuid 8.x → 11.x) and direct dependencies are intentionally
+left untouched so they remain `breaking-upgrade` / manual review.
+
+**Why same-major is the gate**: Same-major upgrades are SemVer-compatible by definition, so
+they are safe to force automatically; the build/test step is the safety net for `0.x` minor
+bumps where SemVer still permits breaking changes. This mirrors the proven manual remediation
+used on workshop-app PR #92 (webpack-dev-server) and PR #103 (the 11-alert batch).
+
+**Tests**: `tests/fixAgent.test.ts` covers `parseMajorVersion` and `isSameMajorUpgrade`
+(same-major, cross-major, ranged/prefixed, and unparseable inputs).
+
+---
+
 ### 2.4 No-fix-available alerts cause permanent daily failures
 
 **Symptom**: Every daily sweep produces a "skipped / install" row for `babel-traverse`
@@ -259,6 +295,7 @@ Verify that the variable exists after writing and retry once if the read-back fa
 | Listener: remove `types:` filter | ✅ Done |
 | Orchestrator: retry when no active PR exists | ✅ Done |
 | FixAgent: nested parent scoped override | ✅ Done (^ version fix April 4) |
+| FixAgent: hoisted top-level same-major override (Phase 2b) | ✅ Done (June 20) |
 | FixAgent: `wrapCommandWithNodeRuntime` sh -c | ✅ Done |
 | FixAgent: nested re-run --legacy-peer-deps fallback | ✅ Done |
 

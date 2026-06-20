@@ -311,6 +311,112 @@ async function deleteNestedLockEntries(
   }
 }
 
+export function parseMajorVersion(version: string): number | undefined {
+  const cleaned = version.replace(/^[^0-9]*/, "");
+  const match = /^(\d+)/.exec(cleaned);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
+ * Returns true when upgrading from `installedVersion` to `patchedVersion` stays within
+ * the same numeric major version (a semver-compatible, non-breaking bump). This is the
+ * gate for the automatic top-level override remediation: same-major bumps are forced,
+ * cross-major gaps are left for manual review. The downstream build/test step is the
+ * safety net for 0.x minor bumps where semver allows breaking changes.
+ */
+export function isSameMajorUpgrade(installedVersion: string, patchedVersion: string): boolean {
+  const installedMajor = parseMajorVersion(installedVersion);
+  const patchedMajor = parseMajorVersion(patchedVersion);
+
+  if (installedMajor === undefined || patchedMajor === undefined) {
+    return false;
+  }
+
+  return installedMajor === patchedMajor;
+}
+
+async function readTopLevelInstalledVersion(
+  lockFilePath: string,
+  depName: string
+): Promise<string | undefined> {
+  try {
+    const raw = await readFile(lockFilePath, "utf8");
+    const lock = JSON.parse(raw) as { packages?: Record<string, { version?: string }> };
+    return lock.packages?.[`node_modules/${depName}`]?.version;
+  } catch {
+    return undefined;
+  }
+}
+
+async function dependencyIsDirect(packageJsonPath: string, depName: string): Promise<boolean> {
+  try {
+    const raw = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    };
+
+    return Boolean(
+      parsed.dependencies?.[depName] ||
+        parsed.devDependencies?.[depName] ||
+        parsed.peerDependencies?.[depName]
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function addTopLevelOverride(
+  packageJsonPath: string,
+  depName: string,
+  patchedVersion: string
+): Promise<boolean> {
+  try {
+    const raw = await readFile(packageJsonPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      overrides?: Record<string, string | Record<string, string>>;
+    };
+
+    parsed.overrides = parsed.overrides ?? {};
+    // Caret range keeps the resolution within the same major version.
+    const versionSpec = `^${patchedVersion}`;
+
+    if (parsed.overrides[depName] === versionSpec) {
+      return false;
+    }
+
+    parsed.overrides[depName] = versionSpec;
+    await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function deleteTopLevelLockEntry(lockFilePath: string, depName: string): Promise<boolean> {
+  try {
+    const raw = await readFile(lockFilePath, "utf8");
+    const lock = JSON.parse(raw) as { packages?: Record<string, unknown> };
+    const packages = lock.packages;
+
+    if (!packages) {
+      return false;
+    }
+
+    const key = `node_modules/${depName}`;
+    if (key in packages) {
+      delete packages[key];
+      await writeFile(lockFilePath, JSON.stringify(lock, null, 2) + "\n", "utf8");
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function parseMinRequiredNodeMajor(output: string): number | undefined {
   const patterns = [
     /EBADENGINE[^\n]*required[^\n]*node@?>=?(\d+)/i,
@@ -691,6 +797,55 @@ export class FixAgent {
               installWorkingDirectory
             );
           }
+        }
+      }
+    }
+
+    // Phase 2b: Top-level overrides for hoisted transitive deps audit fix could not patch.
+    // When a vulnerable transitive is hoisted to the top of node_modules and a parent pins
+    // an older range (common with Angular build tooling), npm audit fix leaves it untouched —
+    // only `npm audit fix --force` (a breaking upgrade) would move it, so the batch would
+    // otherwise be skipped as "breaking-upgrade". If the patched version is within the SAME
+    // MAJOR as the installed version, it is a semver-compatible bump: force it via a top-level
+    // npm override and let the downstream build/test gate validate it. Cross-major gaps and
+    // direct dependencies are left untouched (handled elsewhere / manual review).
+    for (const alert of alertsWithPatchedVersion) {
+      if (!alert.patchedVersion) continue;
+
+      const installWorkingDirectory = resolveInstallWorkingDirectory(repoDir, alert.manifestPath);
+      const lockFilePath = path.join(installWorkingDirectory, "package-lock.json");
+      const packageJsonPath = path.join(installWorkingDirectory, "package.json");
+
+      const installedVersion = await readTopLevelInstalledVersion(lockFilePath, alert.dependencyName);
+      if (!installedVersion) continue;
+
+      // Already at or above the patched version (resolved by Phase 1 or Phase 2).
+      if (!isVersionBelow(installedVersion, alert.patchedVersion)) continue;
+
+      // Overriding a direct dependency triggers EOVERRIDE; those go through the install path.
+      if (await dependencyIsDirect(packageJsonPath, alert.dependencyName)) continue;
+
+      // Only force semver-compatible (same-major) bumps automatically.
+      if (!isSameMajorUpgrade(installedVersion, alert.patchedVersion)) continue;
+
+      const overrideAdded = await addTopLevelOverride(
+        packageJsonPath,
+        alert.dependencyName,
+        alert.patchedVersion
+      );
+
+      if (overrideAdded) {
+        await deleteTopLevelLockEntry(lockFilePath, alert.dependencyName);
+
+        const topLevelInstallResult = await runCommand(
+          wrapCommandWithNodeRuntime("npm install --package-lock-only", runtime),
+          installWorkingDirectory
+        );
+        if (!topLevelInstallResult.success && input.strategy.retryWithLegacyPeerDeps) {
+          await runCommand(
+            wrapCommandWithNodeRuntime("npm install --package-lock-only --legacy-peer-deps", runtime),
+            installWorkingDirectory
+          );
         }
       }
     }

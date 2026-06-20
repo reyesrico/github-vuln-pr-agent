@@ -18,12 +18,37 @@
 - `src/github/dependabot.ts`: Dependabot alert access and PR creation helpers.
 - `src/parsers/githubEmailParser.ts`: advisory-email parsing (repositories, CVE, GHSA, dependency signal).
 - `src/parsers/advisoryDispatchParser.ts`: structured dispatch parsing for repository listener events.
-- `src/agents/fixAgent.ts`: Branch creation and dependency fix.
+- `src/agents/fixAgent.ts`: Branch creation and dependency fix (multi-phase remediation, see below).
 - `src/agents/testAgent.ts`: Lint/test execution.
 - `src/agents/validationAgent.ts`: Final readiness checks.
 - `src/notify/emailNotifier.ts`: SMTP summary notification.
 - `src/agents/orchestrator.ts`: Main control flow.
 - `src/utils/nodeRuntime.ts`: Per-repo Node runtime resolution and command wrapping.
+
+## Fix Remediation Strategy (`fixAgent.applyFixBatch`)
+The fix agent attempts remediation in ordered phases inside the cloned repo. Each phase
+only acts on what previous phases left unresolved, then the batch flows to lint/test/validation.
+
+1. **Phase 1 — `npm audit fix --package-lock-only`**: primary path. Uses npm's advisory graph
+   to apply all automatically-patchable upgrades in one pass. Retries with `--legacy-peer-deps`
+   when enabled.
+2. **Phase 2 — Scoped overrides for nested transitives**: when a parent package pins an older
+   nested copy (`node_modules/<parent>/node_modules/<dep>`), writes a scoped override
+   (`overrides.<parent>.<dep>`), deletes the stale lock entry, and regenerates the lockfile.
+3. **Phase 2b — Top-level overrides for hoisted transitives**: when a vulnerable dependency is
+   hoisted to the top of `node_modules` and a parent pins an older range (common with Angular
+   build tooling), audit fix leaves it untouched and only `npm audit fix --force` would move it.
+   If the patched version is within the **same major** as the installed version (a
+   semver-compatible bump) and the dependency is **not** a direct dependency, the agent forces a
+   top-level override (`overrides.<dep> = ^<patchedVersion>`), deletes the stale top-level lock
+   entry, and regenerates the lockfile. The downstream lint/test gate validates the result.
+   Cross-major gaps are left as `breaking-upgrade` for manual review.
+4. **Phase 3 — Node runtime upgrade**: when audit output reports `EBADENGINE` / "requires node
+   >= X", bumps `engines.node` (and `.nvmrc` / `.node-version` if present) and re-runs Phase 1
+   with the updated runtime.
+
+If no files changed after all phases, the batch is skipped with the audit reason (typically a
+genuine `breaking-upgrade` requiring `npm audit fix --force`).
 
 ## Safety
 - Supports `DRY_RUN=true` for non-destructive trial runs.
