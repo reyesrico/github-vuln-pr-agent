@@ -348,6 +348,36 @@ async function readTopLevelInstalledVersion(
   }
 }
 
+/**
+ * Scans a package-lock.json for every installed copy of `depName` (top-level and nested)
+ * and returns true only when no copy remains below `patchedVersion` — i.e. the advisory is
+ * actually resolved by the fix. Returns true when the lock file cannot be read so a transient
+ * read error never downgrades a legitimately created fix.
+ */
+export async function dependencyResolvedInLockFile(
+  lockFilePath: string,
+  depName: string,
+  patchedVersion: string
+): Promise<boolean> {
+  try {
+    const raw = await readFile(lockFilePath, "utf8");
+    const lock = JSON.parse(raw) as { packages?: Record<string, { version?: string }> };
+    const packages = lock.packages ?? {};
+    const escapedDep = depName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?:^|/)node_modules/${escapedDep}$`);
+
+    for (const [key, pkg] of Object.entries(packages)) {
+      if (pattern.test(key) && pkg.version && isVersionBelow(pkg.version, patchedVersion)) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 async function dependencyIsDirect(packageJsonPath: string, depName: string): Promise<boolean> {
   try {
     const raw = await readFile(packageJsonPath, "utf8");

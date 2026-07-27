@@ -1,3 +1,4 @@
+import path from "node:path";
 import { createGithubClient } from "../github/client.js";
 import {
   createSecurityPullRequest,
@@ -15,7 +16,7 @@ import type { AppConfig } from "../config.js";
 import type { DependabotAlert, FixResult, ProcessedAlertResult, TestResult } from "../types.js";
 import { classifyFailure } from "../utils/failureClassification.js";
 import { logError, logInfo, logWarn } from "../utils/logger.js";
-import { FixAgent } from "./fixAgent.js";
+import { FixAgent, dependencyResolvedInLockFile, resolveInstallWorkingDirectory } from "./fixAgent.js";
 import { TestAgent } from "./testAgent.js";
 import { ValidationAgent } from "./validationAgent.js";
 
@@ -27,6 +28,40 @@ function buildAlertNotificationKey(result: ProcessedAlertResult): string {
 function buildAlertKeyFromAlert(repoFullName: string, alert: DependabotAlert): string {
   const advisory = alert.cveId ?? alert.ghsaId;
   return `${repoFullName}|${alert.dependencyName}|${advisory}`;
+}
+
+/**
+ * Verifies, per alert, that the fixed lock file actually upgraded the vulnerable dependency
+ * to at least its patched version. Returns the set of alert numbers that were NOT resolved —
+ * e.g. when `npm audit fix` only produced a same-major bump that still sits below the required
+ * (breaking, cross-major) patched version. These must be reported as skipped/breaking rather
+ * than falsely reported as "created" just because the batch changed other files.
+ */
+async function findUnresolvedAlerts(
+  localPath: string,
+  alerts: DependabotAlert[]
+): Promise<Set<number>> {
+  const unresolved = new Set<number>();
+
+  for (const alert of alerts) {
+    if (!alert.patchedVersion) {
+      continue;
+    }
+
+    const installDir = resolveInstallWorkingDirectory(localPath, alert.manifestPath);
+    const lockFilePath = path.join(installDir, "package-lock.json");
+    const resolved = await dependencyResolvedInLockFile(
+      lockFilePath,
+      alert.dependencyName,
+      alert.patchedVersion
+    );
+
+    if (!resolved) {
+      unresolved.add(alert.number);
+    }
+  }
+
+  return unresolved;
 }
 
 function createPullRequestBody(
@@ -232,12 +267,50 @@ export class Orchestrator {
         }
 
         if (config.dryRun) {
+          const unresolvedAlerts = await findUnresolvedAlerts(
+            fixResult.localPath,
+            actionableAlerts
+          );
           for (const alert of actionableAlerts) {
+            if (unresolvedAlerts.has(alert.number)) {
+              results.push({
+                repoFullName,
+                alert,
+                status: "skipped",
+                details:
+                  `Dependency ${alert.dependencyName} not upgraded to patched version ` +
+                  `${alert.patchedVersion ?? "?"} (breaking upgrade required)`
+              });
+              continue;
+            }
             results.push({
               repoFullName,
               alert,
               status: "created",
               details: "Dry run mode: PR creation skipped"
+            });
+          }
+          continue;
+        }
+
+        const unresolvedAlerts = await findUnresolvedAlerts(
+          fixResult.localPath,
+          actionableAlerts
+        );
+
+        if (unresolvedAlerts.size === actionableAlerts.length) {
+          logWarn("Fix batch changed files but resolved no target alert", {
+            repoFullName,
+            branch: fixResult.branchName
+          });
+          for (const alert of actionableAlerts) {
+            results.push({
+              repoFullName,
+              alert,
+              status: "skipped",
+              details:
+                `Dependency ${alert.dependencyName} not upgraded to patched version ` +
+                `${alert.patchedVersion ?? "?"} (breaking upgrade required)`
             });
           }
           continue;
@@ -296,6 +369,18 @@ export class Orchestrator {
         }
 
         for (const alert of actionableAlerts) {
+          if (unresolvedAlerts.has(alert.number)) {
+            results.push({
+              repoFullName,
+              alert,
+              status: "skipped",
+              details:
+                `Dependency ${alert.dependencyName} not upgraded to patched version ` +
+                `${alert.patchedVersion ?? "?"} (breaking upgrade required); ` +
+                `other alerts in this batch fixed in ${pullRequest.pullUrl}`
+            });
+            continue;
+          }
           results.push({
             repoFullName,
             alert,

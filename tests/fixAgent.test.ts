@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   createOverrideConflictFallbackCommand,
+  dependencyResolvedInLockFile,
   isGitRefNamespaceConflict,
   isNpmOverrideConflict,
   isSameMajorUpgrade,
   parseMajorVersion,
   resolveInstallWorkingDirectory
 } from "../src/agents/fixAgent.js";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 describe("fixAgent helpers", () => {
   it("detects git ref namespace conflicts", () => {
@@ -81,5 +85,59 @@ describe("fixAgent helpers", () => {
   it("returns false when either version is unparseable", () => {
     expect(isSameMajorUpgrade("latest", "7.28.0")).toBe(false);
     expect(isSameMajorUpgrade("7.24.4", "")).toBe(false);
+  });
+});
+
+describe("dependencyResolvedInLockFile", () => {
+  async function writeLock(packages: Record<string, { version?: string }>): Promise<string> {
+    const dir = await mkdtemp(path.join(tmpdir(), "lock-"));
+    const lockFilePath = path.join(dir, "package-lock.json");
+    await writeFile(lockFilePath, JSON.stringify({ packages }), "utf8");
+    return lockFilePath;
+  }
+
+  it("returns true when the top-level dependency meets the patched version", async () => {
+    const lockFilePath = await writeLock({
+      "node_modules/@hono/node-server": { version: "2.0.10" }
+    });
+
+    expect(
+      await dependencyResolvedInLockFile(lockFilePath, "@hono/node-server", "2.0.5")
+    ).toBe(true);
+  });
+
+  it("returns false when the dependency is still below the patched version", async () => {
+    const lockFilePath = await writeLock({
+      "node_modules/@hono/node-server": { version: "1.19.17" }
+    });
+
+    expect(
+      await dependencyResolvedInLockFile(lockFilePath, "@hono/node-server", "2.0.5")
+    ).toBe(false);
+  });
+
+  it("returns false when a nested copy remains below the patched version", async () => {
+    const lockFilePath = await writeLock({
+      "node_modules/@hono/node-server": { version: "2.0.10" },
+      "node_modules/some-parent/node_modules/@hono/node-server": { version: "1.19.17" }
+    });
+
+    expect(
+      await dependencyResolvedInLockFile(lockFilePath, "@hono/node-server", "2.0.5")
+    ).toBe(false);
+  });
+
+  it("returns true when the dependency is absent from the lock file", async () => {
+    const lockFilePath = await writeLock({
+      "node_modules/other-pkg": { version: "1.0.0" }
+    });
+
+    expect(await dependencyResolvedInLockFile(lockFilePath, "undici", "7.28.0")).toBe(true);
+  });
+
+  it("returns true when the lock file cannot be read", async () => {
+    expect(
+      await dependencyResolvedInLockFile("/nonexistent/package-lock.json", "undici", "7.28.0")
+    ).toBe(true);
   });
 });

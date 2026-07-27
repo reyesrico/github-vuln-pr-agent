@@ -208,6 +208,36 @@ used on workshop-app PR #92 (webpack-dev-server) and PR #103 (the 11-alert batch
 
 ---
 
+### 2.7 Batch reported alerts as "created" without verifying they were resolved — FIXED
+
+**Symptom**: An email reports `@hono/node-server` (GHSA-frvp-7c67-39w9) as **created / PR #119**,
+but the Dependabot alert stays **open**. The alert requires `@hono/node-server >= 2.0.5`, yet
+`npm audit fix` (non-force) only bumped it to `1.19.17` — the batch changed files (fixing the
+*other* `hono` CVEs) and created a PR, so every alert in the batch was optimistically marked
+`created`, including the one that was never actually patched.
+
+**Root cause**: After a fix batch produced changes and passed validation, the orchestrator
+pushed a `created` result for **every** actionable alert without checking whether each alert's
+own dependency had actually reached its patched version. A same-major bump that still sits
+below a required cross-major (breaking) patch is a silent false success.
+
+**Fix applied**: Added `dependencyResolvedInLockFile(lockFilePath, depName, patchedVersion)` to
+`fixAgent.ts`, which scans the regenerated lock file for every installed copy of the dependency
+(top-level and nested) and returns `false` if any copy is still below the patched version. The
+orchestrator now calls `findUnresolvedAlerts(...)` after validation and:
+
+1. Marks each unresolved alert as `skipped` ("not upgraded to patched version … / breaking
+   upgrade required") instead of `created`.
+2. If **all** alerts in the batch are unresolved, it skips PR creation entirely (the batch
+   only changed unrelated files).
+3. Still creates the PR when at least one alert was genuinely resolved, and reports the
+   resolved alerts as `created` while flagging the unresolved ones separately.
+
+**Tests**: `tests/fixAgent.test.ts` covers `dependencyResolvedInLockFile` (top-level met,
+top-level below, nested-copy below, dependency absent, and unreadable lock file).
+
+---
+
 ### 2.4 No-fix-available alerts cause permanent daily failures
 
 **Symptom**: Every daily sweep produces a "skipped / install" row for `babel-traverse`
