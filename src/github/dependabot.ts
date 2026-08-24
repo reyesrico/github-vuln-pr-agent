@@ -2,6 +2,7 @@ import type { Octokit } from "@octokit/rest";
 
 import { splitRepoFullName } from "./client.js";
 import type { AlertSignal, DependabotAlert, PullRequestResult, Severity } from "../types.js";
+import { logWarn } from "../utils/logger.js";
 
 function normalizeSeverity(input: string): Severity {
   if (input === "critical" || input === "high") {
@@ -51,6 +52,17 @@ export async function listOpenDependabotAlerts(
       message.includes("dependabot alerts are disabled") ||
       message.includes("resource not accessible")
     ) {
+      // Swallow the error so a single inaccessible repo doesn't abort the whole sweep, but
+      // surface it loudly: silently returning [] here is indistinguishable from "no open
+      // alerts", which would mask real vulnerabilities (e.g. disabled Dependabot alerts,
+      // or a token missing the security_events/read scope needed to list alerts).
+      logWarn("Unable to list Dependabot alerts for repository; treating as no alerts found", {
+        repoFullName,
+        status,
+        message: maybeError.message ?? "Unknown error",
+        hint:
+          "Verify Dependabot alerts are enabled for this repository and that GITHUB_TOKEN has permission to read them."
+      });
       return [];
     }
 
