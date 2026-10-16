@@ -13,6 +13,15 @@ describe("classifyFailure", () => {
     );
   });
 
+  it.each([
+    "Audit remediation failed; manual review required",
+    "Audit fix failed after retry: ETARGET",
+    "No available Node runtime satisfies >=22 AND 20",
+    "Invalid Node version requirement: not-node-22"
+  ])("classifies remediation failures: %s", message => {
+    expect(classifyFailure(message)).toBe("install");
+  });
+
   it("classifies force upgrade requirements as breaking-upgrade", () => {
     expect(
       classifyFailure(

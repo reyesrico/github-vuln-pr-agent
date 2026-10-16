@@ -76,6 +76,11 @@ npm run dev
 - Otherwise creates a fix branch, applies remediation, runs lint/tests, validates changed files, and opens a PR.
 - One PR per repository (batched) — never multiple PRs for the same repo in one run.
 - Runs install/test commands with per-repo runtime resolution (`REPO_COMMANDS.nodeVersion`, then `engines.node`, then default runtime).
+- Node overrides and repository engines are validated as complete semver ranges. The running Node version is reused when compatible; otherwise an available exact version satisfying both is selected from npm. Invalid, conflicting, or unavailable requirements fail explicitly.
+- Repository Node policies (`engines.node`, `.nvmrc`, `.node-version`) are never rewritten from npm log text. Engine conflicts require manual review.
+- Audit exit codes indicating remaining vulnerabilities are distinguished from installation, registry, engine, or malformed-report failures. Failed retries block the batch instead of producing a successful-looking PR.
+- Every target is verified against all installed lockfile copies before committing/pushing and again before PR creation. Missing or unsupported lockfiles fail verification; an alert without a patched release is resolved only when its dependency has been removed.
+- Partial batches advertise only verified fixes in PR titles/bodies; unresolved targets are reported separately for manual review.
 - Auto-merges low-risk/simple dependency-only outcomes after successful validation.
 - Keeps difficult/breaking upgrades as PR-only and marks them for manual review.
 - Sends a summary email only when there are actionable outcomes or newly seen alerts.
