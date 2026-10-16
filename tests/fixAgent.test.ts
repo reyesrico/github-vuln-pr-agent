@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createOverrideConflictFallbackCommand,
@@ -9,9 +9,14 @@ import {
   parseMajorVersion,
   resolveInstallWorkingDirectory
 } from "../src/agents/fixAgent.js";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+const directories: string[] = [];
+afterEach(async () => {
+  await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
+});
 
 describe("fixAgent helpers", () => {
   it("detects git ref namespace conflicts", () => {
@@ -91,6 +96,7 @@ describe("fixAgent helpers", () => {
 describe("dependencyResolvedInLockFile", () => {
   async function writeLock(packages: Record<string, { version?: string }>): Promise<string> {
     const dir = await mkdtemp(path.join(tmpdir(), "lock-"));
+    directories.push(dir);
     const lockFilePath = path.join(dir, "package-lock.json");
     await writeFile(lockFilePath, JSON.stringify({ packages }), "utf8");
     return lockFilePath;
@@ -135,9 +141,43 @@ describe("dependencyResolvedInLockFile", () => {
     expect(await dependencyResolvedInLockFile(lockFilePath, "undici", "7.28.0")).toBe(true);
   });
 
-  it("returns true when the lock file cannot be read", async () => {
-    expect(
-      await dependencyResolvedInLockFile("/nonexistent/package-lock.json", "undici", "7.28.0")
-    ).toBe(true);
+  it("fails closed when the lock file cannot be read", async () => {
+    await expect(
+      dependencyResolvedInLockFile("/nonexistent/package-lock.json", "undici", "7.28.0")
+    ).rejects.toThrow();
+  });
+
+  it("does not verify an installed package without a published patch", async () => {
+    const lockFilePath = await writeLock({ "node_modules/sprintf-js": { version: "1.0.3" } });
+    expect(await dependencyResolvedInLockFile(lockFilePath, "sprintf-js")).toBe(false);
+  });
+
+  it("verifies removal when no patch is published", async () => {
+    const lockFilePath = await writeLock({ "node_modules/other": { version: "1.0.0" } });
+    expect(await dependencyResolvedInLockFile(lockFilePath, "sprintf-js")).toBe(true);
+  });
+
+  it("checks nested copies even when the unpatched package is not hoisted", async () => {
+    const lockFilePath = await writeLock({
+      "node_modules/parent/node_modules/sprintf-js": { version: "1.0.3" }
+    });
+    expect(await dependencyResolvedInLockFile(lockFilePath, "sprintf-js")).toBe(false);
+  });
+
+  it("rejects missing and malformed installed versions", async () => {
+    for (const version of [undefined, "invalid", "7.28.0-beta.1"]) {
+      const lockFilePath = await writeLock({
+        "node_modules/undici": version === undefined ? {} : { version }
+      });
+      expect(await dependencyResolvedInLockFile(lockFilePath, "undici", "7.28.0")).toBe(false);
+    }
+  });
+
+  it("rejects malformed and unsupported lockfiles", async () => {
+    const lockFilePath = await writeLock({});
+    for (const contents of ["{", "{}", '{"lockfileVersion":1,"dependencies":{}}', '{"packages":null}']) {
+      await writeFile(lockFilePath, contents);
+      await expect(dependencyResolvedInLockFile(lockFilePath, "undici", "7.28.0")).rejects.toThrow();
+    }
   });
 });

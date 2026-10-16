@@ -1,8 +1,11 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { gte, valid } from "semver";
+import { z } from "zod";
 
 import { runCommand } from "../utils/exec.js";
+import { logWarn } from "../utils/logger.js";
 import type { BatchFixInput, DependabotAlert, FixInput, FixResult, RepoCommands, FixStrategy } from "../types.js";
 import { resolveNodeRuntime, type NodeRuntime, wrapCommandWithNodeRuntime } from "../utils/nodeRuntime.js";
 
@@ -350,32 +353,32 @@ async function readTopLevelInstalledVersion(
 
 /**
  * Scans a package-lock.json for every installed copy of `depName` (top-level and nested)
- * and returns true only when no copy remains below `patchedVersion` — i.e. the advisory is
- * actually resolved by the fix. Returns true when the lock file cannot be read so a transient
- * read error never downgrades a legitimately created fix.
+ * and verifies every copy. Without a known patch, only removal can prove resolution.
+ * Unreadable or unsupported lockfiles must never count as a successful fix.
  */
 export async function dependencyResolvedInLockFile(
   lockFilePath: string,
   depName: string,
-  patchedVersion: string
+  patchedVersion?: string
 ): Promise<boolean> {
-  try {
-    const raw = await readFile(lockFilePath, "utf8");
-    const lock = JSON.parse(raw) as { packages?: Record<string, { version?: string }> };
-    const packages = lock.packages ?? {};
-    const escapedDep = depName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`(?:^|/)node_modules/${escapedDep}$`);
-
-    for (const [key, pkg] of Object.entries(packages)) {
-      if (pattern.test(key) && pkg.version && isVersionBelow(pkg.version, patchedVersion)) {
-        return false;
-      }
-    }
-
-    return true;
-  } catch {
-    return true;
+  const raw = await readFile(lockFilePath, "utf8");
+  const lock = z.object({
+    packages: z.record(z.string(), z.object({ version: z.string().optional() }))
+  }).parse(JSON.parse(raw));
+  if (patchedVersion && !valid(patchedVersion)) {
+    throw new Error(`Invalid patched version for ${depName}: ${patchedVersion}`);
   }
+  const escapedDep = depName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(?:^|/)node_modules/${escapedDep}$`);
+
+  for (const [key, pkg] of Object.entries(lock.packages)) {
+    if (!pattern.test(key)) continue;
+    if (!patchedVersion || !pkg.version || !valid(pkg.version) || !gte(pkg.version, patchedVersion)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 async function dependencyIsDirect(packageJsonPath: string, depName: string): Promise<boolean> {
@@ -447,48 +450,6 @@ async function deleteTopLevelLockEntry(lockFilePath: string, depName: string): P
   }
 }
 
-function parseMinRequiredNodeMajor(output: string): number | undefined {
-  const patterns = [
-    /EBADENGINE[^\n]*required[^\n]*node@?>=?(\d+)/i,
-    /requires? node@?>=?(\d+)/i,
-    /engine.*node.*>=\s*(\d+)/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = pattern.exec(output);
-    const major = match?.[1];
-    if (major) {
-      return Number(major);
-    }
-  }
-
-  return undefined;
-}
-
-async function bumpNodeVersionInManifest(
-  packageJsonPath: string,
-  requiredMajor: number
-): Promise<boolean> {
-  try {
-    const raw = await readFile(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { engines?: { node?: string } };
-    const currentSpec = parsed.engines?.node ?? "";
-    const currentMajorMatch = /(\d+)/.exec(currentSpec);
-    const currentMajor = currentMajorMatch ? Number(currentMajorMatch[1]) : 0;
-
-    if (currentMajor >= requiredMajor) {
-      return false;
-    }
-
-    parsed.engines = parsed.engines ?? {};
-    parsed.engines.node = `>=${requiredMajor}`;
-    await writeFile(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function getInstallVersionSpec(
   installWorkingDirectory: string,
   dependencyName: string,
@@ -553,36 +514,55 @@ export class FixAgent {
     strategy: FixStrategy,
     runtime: NodeRuntime
   ): Promise<string | undefined> {
-    const auditCommand = "npm audit fix --package-lock-only";
-    let auditResult = await runCommand(
+    const auditCommand = "npm audit fix --package-lock-only --json";
+    const auditResult = await runCommand(
       wrapCommandWithNodeRuntime(auditCommand, runtime),
       installWorkingDirectory
     );
     let legacyAttemptOutput: string | undefined;
 
-    if (!auditResult.success && strategy.retryWithLegacyPeerDeps) {
+    const completedAudit = (result: typeof auditResult): boolean => {
+      if (/\bEBADENGINE\b/.test(result.stderr)) return false;
+      try {
+        const report = z.object({
+          auditReportVersion: z.literal(2),
+          vulnerabilities: z.record(z.string(), z.unknown()),
+          metadata: z.object({ vulnerabilities: z.object({ total: z.number().nonnegative() }) })
+        }).parse(JSON.parse(result.stdout));
+        if (!result.success) {
+          logWarn("Audit completed with remaining vulnerabilities; verifying target dependencies", {
+            installWorkingDirectory,
+            remaining: report.metadata.vulnerabilities.total
+          });
+        }
+        return result.success || report.metadata.vulnerabilities.total > 0;
+      } catch (error) {
+        logWarn("Audit remediation did not return a valid report", {
+          installWorkingDirectory,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return false;
+      }
+    };
+
+    if (completedAudit(auditResult)) return undefined;
+
+    if (strategy.retryWithLegacyPeerDeps) {
       const retryCommand = withLegacyPeerDeps(auditCommand);
       const retryResult = await runCommand(
         wrapCommandWithNodeRuntime(retryCommand, runtime),
         installWorkingDirectory
       );
 
-      if (retryResult.success) {
-        auditResult = retryResult;
-      } else {
-        legacyAttemptOutput = retryResult.output;
-      }
+      if (completedAudit(retryResult)) return undefined;
+      legacyAttemptOutput = retryResult.output;
     }
 
-    if (!auditResult.success) {
-      if (legacyAttemptOutput) {
-        return `Audit fix failed after retry in ${installWorkingDirectory}: ${auditResult.output}\nRetry (${withLegacyPeerDeps(auditCommand)}) failed: ${legacyAttemptOutput}`;
-      }
-
-      return `Audit fix failed in ${installWorkingDirectory}: ${auditResult.output}`;
+    if (legacyAttemptOutput) {
+      return `Audit fix failed after retry in ${installWorkingDirectory}: ${auditResult.output}\nRetry (${withLegacyPeerDeps(auditCommand)}) failed: ${legacyAttemptOutput}`;
     }
 
-    return undefined;
+    return `Audit fix failed in ${installWorkingDirectory}: ${auditResult.output}`;
   }
 
   private async collectChangedFiles(repoDir: string): Promise<string[]> {
@@ -594,35 +574,23 @@ export class FixAgent {
     return parseChangedFiles(status.output);
   }
 
-  private async tryNodeVersionUpgrade(
-    repoDir: string,
-    auditOutput: string
-  ): Promise<boolean> {
-    const requiredMajor = parseMinRequiredNodeMajor(auditOutput);
-    if (!requiredMajor) {
-      return false;
+  private async installLockfileWithFallbacks(
+    installWorkingDirectory: string,
+    strategy: FixStrategy,
+    runtime: NodeRuntime
+  ): Promise<void> {
+    const command = "npm install --package-lock-only";
+    const result = await runCommand(wrapCommandWithNodeRuntime(command, runtime), installWorkingDirectory);
+    if (result.success) return;
+    if (strategy.retryWithLegacyPeerDeps) {
+      const retry = await runCommand(
+        wrapCommandWithNodeRuntime(withLegacyPeerDeps(command), runtime),
+        installWorkingDirectory
+      );
+      if (retry.success) return;
+      throw new Error(`Dependency update failed: ${result.output}\nRetry failed: ${retry.output}`);
     }
-
-    const packageJsonPath = path.join(repoDir, "package.json");
-    const bumped = await bumpNodeVersionInManifest(packageJsonPath, requiredMajor);
-
-    if (bumped) {
-      for (const versionFile of [".nvmrc", ".node-version"]) {
-        const filePath = path.join(repoDir, versionFile);
-        try {
-          const current = (await readFile(filePath, "utf8")).trim();
-          const currentMajorMatch = /(\d+)/.exec(current);
-          const currentMajor = currentMajorMatch ? Number(currentMajorMatch[1]) : 0;
-          if (currentMajor < requiredMajor) {
-            await writeFile(filePath, `${requiredMajor}\n`, "utf8");
-          }
-        } catch {
-          // File does not exist; skip.
-        }
-      }
-    }
-
-    return bumped;
+    throw new Error(`Dependency update failed: ${result.output}`);
   }
 
   // NOTE: applyInstallCommandWithFallbacks intentionally removed.
@@ -817,16 +785,7 @@ export class FixAgent {
         if (overrideAdded) {
           await deleteNestedLockEntries(lockFilePath, nestedParents, alert.dependencyName);
 
-          const nestedInstallResult = await runCommand(
-            wrapCommandWithNodeRuntime("npm install --package-lock-only", runtime),
-            installWorkingDirectory
-          );
-          if (!nestedInstallResult.success && input.strategy.retryWithLegacyPeerDeps) {
-            await runCommand(
-              wrapCommandWithNodeRuntime("npm install --package-lock-only --legacy-peer-deps", runtime),
-              installWorkingDirectory
-            );
-          }
+          await this.installLockfileWithFallbacks(installWorkingDirectory, input.strategy, runtime);
         }
       }
     }
@@ -867,31 +826,18 @@ export class FixAgent {
       if (overrideAdded) {
         await deleteTopLevelLockEntry(lockFilePath, alert.dependencyName);
 
-        const topLevelInstallResult = await runCommand(
-          wrapCommandWithNodeRuntime("npm install --package-lock-only", runtime),
-          installWorkingDirectory
-        );
-        if (!topLevelInstallResult.success && input.strategy.retryWithLegacyPeerDeps) {
-          await runCommand(
-            wrapCommandWithNodeRuntime("npm install --package-lock-only --legacy-peer-deps", runtime),
-            installWorkingDirectory
-          );
-        }
+        await this.installLockfileWithFallbacks(installWorkingDirectory, input.strategy, runtime);
       }
     }
 
-    // Phase 3: Node version upgrade.
-    // If audit output contains EBADENGINE or "requires node >= X", bump the repo's
-    // engines.node (and .nvmrc/.node-version if present) to the required major, then
-    // re-run audit fix with the updated runtime so packages that needed a newer Node
-    // can now resolve to their patched versions.
-    const combinedAuditOutput = auditErrors.join("\n");
-    const nodeVersionBumped = await this.tryNodeVersionUpgrade(repoDir, combinedAuditOutput);
-
-    if (nodeVersionBumped) {
-      const updatedRuntime = await resolveNodeRuntime(repoDir, input.commands.nodeVersion);
+    if (auditErrors.length > 0) {
+      const retryErrors: string[] = [];
       for (const installWorkingDirectory of allManifestDirs) {
-        await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, updatedRuntime);
+        const error = await this.tryAuditFixWithFallbacks(installWorkingDirectory, input.strategy, runtime);
+        if (error) retryErrors.push(error);
+      }
+      if (retryErrors.length > 0) {
+        throw new Error(`Audit remediation failed; manual review required. Repository Node requirements were preserved.\n${auditErrors.join("\n")}\nFinal retry:\n${retryErrors.join("\n")}`);
       }
     }
 
@@ -912,8 +858,26 @@ export class FixAgent {
       };
     }
 
-    const dependencyList = input.alerts.map((alert) => alert.dependencyName).join(", ");
-    const commitMessage = `fix(security): apply ${input.alerts.length} dependency updates (${dependencyList})`;
+    const resolvedAlerts: DependabotAlert[] = [];
+    for (const alert of input.alerts) {
+      const lockFilePath = path.join(resolveInstallWorkingDirectory(repoDir, alert.manifestPath), "package-lock.json");
+      if (await dependencyResolvedInLockFile(lockFilePath, alert.dependencyName, alert.patchedVersion)) {
+        resolvedAlerts.push(alert);
+      }
+    }
+    if (resolvedAlerts.length === 0) {
+      return {
+        repoFullName: input.repoFullName,
+        branchName,
+        changedFiles,
+        localPath: repoDir,
+        commitMessage: "",
+        skipped: true,
+        reason: "Files changed, but no targeted vulnerability was verified as resolved; dependencies without a patched version must be removed"
+      };
+    }
+    const dependencyList = resolvedAlerts.map((alert) => alert.dependencyName).join(", ");
+    const commitMessage = `fix(security): apply ${resolvedAlerts.length} dependency updates (${dependencyList})`;
 
     const addResult = await runCommand("git add -A", repoDir);
     if (!addResult.success) {
@@ -968,18 +932,6 @@ export class FixAgent {
   }
 
   async applyFix(input: FixInput): Promise<FixResult> {
-    if (!input.alert.patchedVersion) {
-      return {
-        repoFullName: input.repoFullName,
-        branchName: "",
-        changedFiles: [],
-        localPath: "",
-        commitMessage: "",
-        skipped: true,
-        reason: "No patched version provided by Dependabot alert"
-      };
-    }
-
     const batchResult = await this.applyFixBatch({
       repoFullName: input.repoFullName,
       alerts: [input.alert],

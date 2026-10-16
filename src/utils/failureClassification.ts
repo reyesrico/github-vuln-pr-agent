@@ -18,6 +18,10 @@ export function classifyFailure(message: string): FailureCategory {
 
   if (
     normalized.includes("dependency update failed") ||
+    normalized.includes("audit remediation failed") ||
+    normalized.includes("audit fix failed") ||
+    normalized.includes("node runtime") ||
+    normalized.includes("node version requirement") ||
     normalized.includes("eresolve") ||
     normalized.includes("peer dependency")
   ) {

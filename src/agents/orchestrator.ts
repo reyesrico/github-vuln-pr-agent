@@ -31,11 +31,8 @@ function buildAlertKeyFromAlert(repoFullName: string, alert: DependabotAlert): s
 }
 
 /**
- * Verifies, per alert, that the fixed lock file actually upgraded the vulnerable dependency
- * to at least its patched version. Returns the set of alert numbers that were NOT resolved —
- * e.g. when `npm audit fix` only produced a same-major bump that still sits below the required
- * (breaking, cross-major) patched version. These must be reported as skipped/breaking rather
- * than falsely reported as "created" just because the batch changed other files.
+ * Verifies all installed copies, including alerts without a published patch.
+ * Unverified alerts must not be advertised as fixed by unrelated file changes.
  */
 async function findUnresolvedAlerts(
   localPath: string,
@@ -44,10 +41,6 @@ async function findUnresolvedAlerts(
   const unresolved = new Set<number>();
 
   for (const alert of alerts) {
-    if (!alert.patchedVersion) {
-      continue;
-    }
-
     const installDir = resolveInstallWorkingDirectory(localPath, alert.manifestPath);
     const lockFilePath = path.join(installDir, "package-lock.json");
     const resolved = await dependencyResolvedInLockFile(
@@ -71,7 +64,7 @@ function createPullRequestBody(
   const bulletList = alerts
     .map((alert) => {
       const advisory = alert.cveId ?? alert.ghsaId;
-      return `- ${alert.dependencyName} -> ${alert.patchedVersion ?? "unknown"} (${advisory})`;
+      return `- ${alert.dependencyName} -> ${alert.patchedVersion ?? "removed (no patched release)"} (${advisory})`;
     })
     .join("\n");
 
@@ -95,6 +88,12 @@ function createPullRequestBody(
     "## Quick Merge",
     `Run: gh pr merge ${prUrlPlaceholder} --auto --squash`
   ].join("\n");
+}
+
+function unresolvedAlertDetails(alert: DependabotAlert): string {
+  return alert.patchedVersion
+    ? `Dependency ${alert.dependencyName} remains below patched version ${alert.patchedVersion}; manual review required`
+    : `Dependency ${alert.dependencyName} remains installed with no published patched version; manual review required`;
 }
 
 function isSimpleAutoMergeCandidate(fixResult: FixResult, testResult: TestResult): boolean {
@@ -277,9 +276,7 @@ export class Orchestrator {
                 repoFullName,
                 alert,
                 status: "skipped",
-                details:
-                  `Dependency ${alert.dependencyName} not upgraded to patched version ` +
-                  `${alert.patchedVersion ?? "?"} (breaking upgrade required)`
+                details: unresolvedAlertDetails(alert)
               });
               continue;
             }
@@ -308,9 +305,7 @@ export class Orchestrator {
               repoFullName,
               alert,
               status: "skipped",
-              details:
-                `Dependency ${alert.dependencyName} not upgraded to patched version ` +
-                `${alert.patchedVersion ?? "?"} (breaking upgrade required)`
+              details: unresolvedAlertDetails(alert)
             });
           }
           continue;
@@ -336,8 +331,9 @@ export class Orchestrator {
         }
 
         const placeholder = `https://github.com/${repoFullName}/pull/<new-pr-number>`;
-        const title = `fix(security): apply ${actionableAlerts.length} dependency updates`;
-        const body = createPullRequestBody(actionableAlerts, placeholder);
+        const resolvedAlerts = actionableAlerts.filter(alert => !unresolvedAlerts.has(alert.number));
+        const title = `fix(security): apply ${resolvedAlerts.length} dependency updates`;
+        const body = createPullRequestBody(resolvedAlerts, placeholder);
 
         const pullRequest = await createSecurityPullRequest(
           client,
@@ -375,8 +371,7 @@ export class Orchestrator {
               alert,
               status: "skipped",
               details:
-                `Dependency ${alert.dependencyName} not upgraded to patched version ` +
-                `${alert.patchedVersion ?? "?"} (breaking upgrade required); ` +
+                `${unresolvedAlertDetails(alert)}; ` +
                 `other alerts in this batch fixed in ${pullRequest.pullUrl}`
             });
             continue;

@@ -15,7 +15,7 @@ function resolveShell(): string | undefined {
 export async function runCommand(
   command: string,
   cwd: string
-): Promise<{ success: boolean; output: string }> {
+): Promise<{ success: boolean; output: string; stdout: string; stderr: string }> {
   try {
     const result = await execAsync(command, {
       cwd,
@@ -24,6 +24,8 @@ export async function runCommand(
     });
     return {
       success: true,
+      stdout: result.stdout,
+      stderr: result.stderr,
       output: [result.stdout, result.stderr].filter(Boolean).join("\n")
     };
   } catch (error) {
@@ -33,6 +35,8 @@ export async function runCommand(
     };
     return {
       success: false,
+      stdout: err.stdout ?? "",
+      stderr: err.stderr ?? "",
       output: [err.stdout, err.stderr, err.message].filter(Boolean).join("\n")
     };
   }
