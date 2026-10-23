@@ -8,6 +8,7 @@ import { runCommand } from "../utils/exec.js";
 import { logWarn } from "../utils/logger.js";
 import type { BatchFixInput, DependabotAlert, FixInput, FixResult, RepoCommands, FixStrategy } from "../types.js";
 import { resolveNodeRuntime, type NodeRuntime, wrapCommandWithNodeRuntime } from "../utils/nodeRuntime.js";
+import { planAngularReleaseGroupUpdate } from "./angularReleaseGroup.js";
 
 function sanitizeBranchSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]/g, "-");
@@ -43,11 +44,10 @@ function createFlatFallbackBatchBranchName(repoFullName: string, branchPrefix: s
   return normalizeBranchName(branch);
 }
 
-function parseChangedFiles(statusOutput: string): string[] {
+export function parseChangedFiles(statusOutput: string): string[] {
   return statusOutput
     .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
+    .filter((line) => line.trim())
     .map((line) => line.slice(3).trim())
     .filter(Boolean);
 }
@@ -524,11 +524,14 @@ export class FixAgent {
     const completedAudit = (result: typeof auditResult): boolean => {
       if (/\bEBADENGINE\b/.test(result.stderr)) return false;
       try {
+        const parsed: unknown = JSON.parse(result.stdout);
+        const envelope = z.object({ audit: z.unknown().optional(), error: z.unknown().optional() }).parse(parsed);
+        if (envelope.error !== undefined) return false;
         const report = z.object({
           auditReportVersion: z.literal(2),
           vulnerabilities: z.record(z.string(), z.unknown()),
           metadata: z.object({ vulnerabilities: z.object({ total: z.number().nonnegative() }) })
-        }).parse(JSON.parse(result.stdout));
+        }).parse(envelope.audit ?? parsed);
         if (!result.success) {
           logWarn("Audit completed with remaining vulnerabilities; verifying target dependencies", {
             installWorkingDirectory,
@@ -757,6 +760,33 @@ export class FixAgent {
       }
     }
 
+    const coordinatedInstallDirectories: string[] = [];
+    // Direct Angular dependencies require coordinated exact-peer releases, not overrides.
+    for (const installWorkingDirectory of allManifestDirs) {
+      const alerts = input.alerts.filter(alert =>
+        resolveInstallWorkingDirectory(repoDir, alert.manifestPath) === installWorkingDirectory
+      );
+      const unresolved: DependabotAlert[] = [];
+      for (const alert of alerts) {
+        if (!(await dependencyResolvedInLockFile(
+          path.join(installWorkingDirectory, "package-lock.json"),
+          alert.dependencyName,
+          alert.patchedVersion
+        ))) unresolved.push(alert);
+      }
+      const packages = await planAngularReleaseGroupUpdate(installWorkingDirectory, unresolved);
+      if (packages.length === 0) continue;
+      logWarn("Applying coordinated Angular patch update with strict peer resolution", {
+        installWorkingDirectory, packages
+      });
+      const command = `npm install ${packages.join(" ")} --package-lock-only --ignore-scripts`;
+      const result = await runCommand(wrapCommandWithNodeRuntime(command, runtime), installWorkingDirectory);
+      if (!result.success) {
+        throw new Error(`Angular release-group dependency update failed: ${result.output}`);
+      }
+      coordinatedInstallDirectories.push(installWorkingDirectory);
+    }
+
     // Phase 2: Scoped overrides for transitive nested copies not resolved by audit fix.
     // Some parent packages pin an exact older version of a dep; npm audit fix leaves
     // those nested copies untouched. We write a scoped npm override (overrides.parent.dep)
@@ -838,6 +868,16 @@ export class FixAgent {
       }
       if (retryErrors.length > 0) {
         throw new Error(`Audit remediation failed; manual review required. Repository Node requirements were preserved.\n${auditErrors.join("\n")}\nFinal retry:\n${retryErrors.join("\n")}`);
+      }
+    }
+
+    // Audit and override retries can change the lock again; validate the final graph.
+    for (const installWorkingDirectory of coordinatedInstallDirectories) {
+      const cleanInstall = await runCommand(
+        wrapCommandWithNodeRuntime("npm ci", runtime), installWorkingDirectory
+      );
+      if (!cleanInstall.success) {
+        throw new Error(`Angular release-group clean install failed: ${cleanInstall.output}`);
       }
     }
 

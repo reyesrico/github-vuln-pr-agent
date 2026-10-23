@@ -7,6 +7,7 @@ import {
   isNpmOverrideConflict,
   isSameMajorUpgrade,
   parseMajorVersion,
+  parseChangedFiles,
   resolveInstallWorkingDirectory
 } from "../src/agents/fixAgent.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -19,6 +20,12 @@ afterEach(async () => {
 });
 
 describe("fixAgent helpers", () => {
+  it("preserves filenames when parsing staged and unstaged changes", () => {
+    expect(parseChangedFiles(" M package.json\nM  package-lock.json\n?? new-file.json\n")).toEqual([
+      "package.json", "package-lock.json", "new-file.json"
+    ]);
+  });
+
   it("detects git ref namespace conflicts", () => {
     const output =
       "cannot lock ref 'refs/heads/chore/security/pkg/1.2.3/alert-1/x': 'refs/heads/chore/security/pkg/1.2.3' exists; cannot create";

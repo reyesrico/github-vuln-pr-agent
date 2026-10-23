@@ -79,6 +79,8 @@ npm run dev
 - Node overrides and repository engines are validated as complete semver ranges. The running Node version is reused when compatible; otherwise an available exact version satisfying both is selected from npm. Invalid, conflicting, or unavailable requirements fail explicitly.
 - Repository Node policies (`engines.node`, `.nvmrc`, `.node-version`) are never rewritten from npm log text. Engine conflicts require manual review.
 - Audit exit codes indicating remaining vulnerabilities are distinguished from installation, registry, engine, or malformed-report failures. Failed retries block the batch instead of producing a successful-looking PR.
+- Both direct audit reports and npm install-style `{ audit: ... }` reports are accepted; npm operational errors still fail closed.
+- Unresolved direct Angular framework alerts trigger a coordinated update of installed framework/compiler dependencies within the same stable major/minor release line. CLI, devkit and Material are not blindly aligned. The highest installed/patched/declared-minimum group version is used to avoid downgrades; complex version policies and cross-minor/major changes require manual review. This recovery uses strict peer resolution and a clean `npm ci`, never `--force` or `--legacy-peer-deps`.
 - Every target is verified against all installed lockfile copies before committing/pushing and again before PR creation. Missing or unsupported lockfiles fail verification; an alert without a patched release is resolved only when its dependency has been removed.
 - Partial batches advertise only verified fixes in PR titles/bodies; unresolved targets are reported separately for manual review.
 - Auto-merges low-risk/simple dependency-only outcomes after successful validation.
